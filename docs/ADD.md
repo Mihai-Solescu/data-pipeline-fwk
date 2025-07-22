@@ -187,7 +187,55 @@ To provide clear feedback to the user, the framework implements a flexible, dual
   * `'silent'`: Suppresses all output except for fatal errors and the final summary.
 * **Error Logging:** All errors caught by the Executor are logged with their full message and stack trace, regardless of the verbosity level, to ensure critical information is never lost.
 
-## 4. Source Code and Project Structure
+## 4. Implementation Details and Constraints
+
+This section details low-level design decisions and constraints that are critical for a robust implementation.
+
+### 4.1. Concurrency and File Locking
+
+To prevent cache corruption from concurrent pipeline runs on the same file, the `StorageManager` must implement a file-locking mechanism.
+
+* **Mechanism:** Upon starting a run, the framework will create a `.lock` file next to the HDF5 cache. If this file already exists, the framework will refuse to start and will throw an error.
+* **Cleanup:** The `.lock` file must be reliably deleted upon successful completion or in a `try/catch/finally` block to handle termination due to an error.
+
+### 4.2. Hashing and Function Constraints
+
+The provenance hashing mechanism relies on being able to locate the source file for a component function.
+
+* **Constraint:** All component functions referenced by a function handle in the configuration **must be defined in their own `.m` files** and be located on the MATLAB path.
+* **Validation:** The configuration validation routine must verify this for every stage by checking that `which(func2str(handle))` returns a valid file path. It will fail immediately if a handle is to an anonymous, nested, or otherwise unlocatable function.
+
+### 4.3. Data Serialization Strategy
+
+The HDF5 file format has limitations regarding complex MATLAB data types.
+
+* **Constraint:** For the initial version, component functions must only output data types that are natively compatible with HDF5 (e.g., numerical arrays, char arrays, and structs containing these types).
+* **Future Scope:** Support for arbitrary data types (e.g., complex cell arrays, objects) would require a dedicated serialization layer (e.g., converting the variable to a binary blob or JSON string before saving), which is out of scope for the initial implementation.
+
+### 4.4. Index Manifest Design for Performance
+
+To ensure that dependency resolution is performant even with thousands of cached results, the storage index must be designed for efficient queries.
+
+* **Design:** The `/index/manifest` within the HDF5 file will be a single, queryable table. For each cached result, this table will store not only its `ProvenanceHash` but also the key parameters (e.g., `rank`, `ts_len`) associated with that result.
+* **Benefit:** This allows the `Resolver`'s `.where()` clause to execute a fast, indexed query on this single table, rather than needing to load metadata from thousands of individual cache entries.
+
+### 4.5. Memory Footprint and Scalability
+
+The current architecture prioritizes performance by holding the job registry and the L1 cache in memory.
+
+* **Known Trade-off:** This design is optimized for workflows whose state and temporary data can fit within a single machine's available RAM.
+* **Future Scope:** For extremely large-scale workflows, future versions could explore optimizations like spilling the job registry to disk or implementing a more sophisticated L1 cache eviction policy. These are out of scope for the initial implementation.
+
+### 4.6. User Contract for Parallel Safety
+
+The framework's parallel execution model is safe only if the user-provided code adheres to certain constraints.
+
+* **Constraint:** All component functions **must be `parfor`-compliant**. This is a strict requirement.
+* **User Responsibility:** The user is responsible for ensuring their code is free of side effects, such as accessing `global` variables, modifying variables in parent workspaces, or performing unsafe file I/O. The framework cannot programmatically enforce perfect function purity. This will be explicitly stated in the user documentation.
+
+---
+
+## 5. Source Code and Project Structure
 
 The project root directory is laid out as follows:
 
