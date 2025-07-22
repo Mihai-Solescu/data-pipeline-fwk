@@ -24,7 +24,7 @@ To create a modular, reusable, and efficient MATLAB framework for executing comp
 ## 2. Core Objectives
 
 * **Modularity & Reusability**: Decouple the pipeline's execution logic from the scientific computation itself.
-* **Reproducibility**: Ensure a given configuration and dataset will always produce the exact same results.
+* **Reproducibility**: Ensure a given configuration and dataset will always produce the exact same results. This includes ensuring that results are cryptographically tied to the exact version of the code that produced them, allowing seamless integration with version control systems like Git.
 * **Computational Efficiency**: Avoid re-running any stage unless its code, inputs, or relevant parameters have changed.
 * **Extensibility**: Allow users to add new stages and parameters by modifying only the configuration file and adding new, isolated component functions.
 * **User-Driven Optimization**: Empower scientists to define custom optimization policies for data persistence and retrieval.
@@ -65,6 +65,7 @@ To create a modular, reusable, and efficient MATLAB framework for executing comp
 * **FR-5**: The system shall support singleton (setup), per-run, and global (barrier) stage execution modes.
 * **FR-6**: The system shall allow users to define conditional storage policies for stage outputs.
 * **FR-7**: The system shall support advanced, user-defined data retrieval and transformation policies to enable intelligent, cross-run data sharing.
+* **FR-8**: The system shall automatically detect any change to a component function's source code. A change in a stage's code must invalidate its cached result and trigger re-computation for itself and all downstream dependents.
 
 ---
 

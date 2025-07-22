@@ -1,6 +1,6 @@
 # Architecture Design Document: General-Purpose Scientific Pipeline Framework
 
-**Version:** 0.11.0
+**Version:** 0.12.0
 **Date:** 2025-07-22
 
 ---
@@ -12,7 +12,7 @@ Our architecture is guided by the project's philosophy, translated into technica
 1. **Separation of Concerns:** The Executor engine is strictly decoupled from user-provided component functions.
 2. **Declarative Configuration:** The entire workflow is defined in a MATLAB configuration file.
 3. **Native Syntax:** Interfaces prefer idiomatic MATLAB patterns (programmatic recipes, function handles) over custom languages.
-4. **Content-Addressable Storage:** All data is stored and retrieved based on a hash of its provenance, not its location or name.
+4. **Provenance-Based Caching:** All data is stored and retrieved based on a hash of its provenance, not its location or name.
 
 ---
 
@@ -43,6 +43,14 @@ All persistent data is stored externally in the user's workspace, never inside t
 * The path to the storage backend (e.g., the `.h5` file) is a **required field** in the user's configuration object (e.g., `config.storage.filepath`).
 * The framework's **Storage Manager** component reads this path from the configuration and uses it exclusively for all read/write operations.
 
+### 2.4. Integration with Version Control (Git)
+
+The framework is designed to work seamlessly with external version control systems like Git without requiring any direct integration. This "version awareness" is an emergent property of the Provenance Hashing mechanism.
+
+The **Code Hash** component of the Provenance Hash acts as the implicit version identifier for any computation. Because the hash is derived from the raw content of the `.m` file, any change to the code—no matter how small—results in a new hash.
+
+This enables a robust workflow for researchers using Git: when a user switches branches, the framework automatically detects the code state on disk and uses the correct cached data for that exact version of the code.
+
 ---
 
 ## 3. System Architecture
@@ -53,7 +61,7 @@ The framework consists of several key internal components that work together.
 
 The Executor is the central engine. Its workflow is as follows:
 
-1. **Initialization:** Loads the configuration file and generates the list of all parameter runs.
+1. **Initialization:** Loads the configuration object and generates the list of all parameter runs.
 2. **Graph Analysis:** Constructs a dependency graph from the `config.stages` collection and performs a topological sort to create a valid execution plan and detect cycles.
 3. **Task Scheduling:** Operates as a task-based scheduler. It identifies all individual jobs (a stage for a given run) and submits ready jobs (whose dependencies are met) to a worker pool managed by the Parallel Computing Toolbox.
 4. **Execution:** For each job, it uses the **Resolver** to gather inputs, checks the **Storage Manager** for a cached result, and if necessary, executes the component function. It then uses the **Storage Manager** to save the results according to the defined storage policy.
@@ -72,7 +80,7 @@ A stage is defined by a struct with fields including:
 
 ### 3.3. The Dependency Recipe and Resolver
 
-To ensure a flexible and MATLAB-native interface, dependencies are defined programmatically using a fluent interface provided by the **Resolver**. This recipe replaces string-based URIs.
+To ensure a flexible and MATLAB-native interface, dependencies are defined programmatically using a fluent interface provided by the **Resolver**.
 
 * **Role:** The Resolver translates a dependency recipe into a specific **Provenance Hash**.
 * **Syntax:** `resolver.get('source_stage').where(...).transform(...)`
@@ -81,7 +89,7 @@ To ensure a flexible and MATLAB-native interface, dependencies are defined progr
 ### 3.4. The Storage System
 
 * **Storage Manager:** A component responsible for the physical reading and writing of data to either the in-memory cache or the persistent HDF5 file, given a specific Provenance Hash.
-* **Content-Addressable Storage:** The HDF5 backend acts as a key-value store. Data is stored in a flat `/data/` group, where each entry's name is its unique Provenance Hash. This prevents data conflicts and enables version-aware caching.
+* **Provenance-Based Caching:** The HDF5 backend acts as a key-value store. Data is stored in a flat `/data/` group, where each entry's name is its unique Provenance Hash. This prevents data conflicts and enables version-aware caching.
 * **Provenance Hash:** A unique fingerprint derived from three sources:
     1. The hash of the component function's M-file.
     2. The Provenance Hashes of all direct inputs (enabling cascading invalidation).
@@ -95,9 +103,11 @@ User-provided scientific code must be written as stateless functions.
 * They return a single struct of outputs.
 * They must not perform any file I/O or access global state, ensuring they are pure and reproducible.
 
+---
+
 ## 4. Source Code and Project Structure
 
-To ensure maintainability, testability, and a clean separation between the public API and internal logic, the framework's source code is organized into a standard package structure. This structure is designed to be packaged directly into a MATLAB toolbox.
+To ensure maintainability, testability, and a clean separation between the public API and internal logic, the framework's source code is organized into a standard package structure.
 
 The project root directory is laid out as follows:
 
@@ -128,7 +138,7 @@ data-pipeline-framework/
 │   └── ... (Self-contained example projects)
 │
 └── tests/
-└── ... (Unit and integration tests)
+    └── ... (Unit and integration tests)
 ```
 
 ### Component Roles
@@ -137,11 +147,7 @@ data-pipeline-framework/
   * **`run.m`**: The primary entry point for executing a pipeline.
   * **`get.m`**: The factory function for creating a dependency recipe.
   * **`Recipe.m`**: The class defining the fluent interface for dependency recipes.
-
 * **`+pipeline/+internal/`**: A nested subpackage for all core engine components. This makes the implementation details private and inaccessible from the user's workspace, preventing misuse and creating a stable public API.
-
 * **`docs/`**: Contains all project documentation, including the SRS, this ADD, and the ADR log.
-
-* **`examples/`**: Contains one or more self-contained example projects that demonstrate how to use the framework. These also serve as end-to-end tests.
-
-* **`tests/`**: Contains all unit and integration tests for the framework's internal components, ensuring code quality and reliability.
+* **`examples/`**: Contains one or more self-contained example projects that demonstrate how to use the framework.
+* **`tests/`**: Contains all unit and integration tests for the framework's internal components.
