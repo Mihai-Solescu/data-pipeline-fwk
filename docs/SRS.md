@@ -1,6 +1,6 @@
 # Software Requirements Specification: General-Purpose Scientific Pipeline Framework
 
-**Version:** 0.13.0
+**Version:** 0.17.0
 **Date:** 2025-07-22
 
 ---
@@ -37,7 +37,9 @@ To create a modular, reusable, and efficient MATLAB framework for executing comp
 
 * A generic pipeline executor engine.
 * A configuration system for defining parameter sweeps and a computational dependency graph.
-* Management of a single-file, HDF5-based storage backend, including a garbage collection utility.
+* Management of a single-file, HDF5-based storage backend, including a **garbage collection utility**.
+* A configurable, dual-output **logging system** with multiple verbosity levels.
+* User-configurable **error handling modes** (resilient and fail-fast).
 * An in-memory caching mechanism for a single pipeline run.
 * Automatic dependency checking and result invalidation based on content hashing.
 * Validation that the stage dependencies form a Directed Acyclic Graph (DAG).
@@ -67,6 +69,10 @@ To create a modular, reusable, and efficient MATLAB framework for executing comp
 * **FR-7**: The system shall support advanced, user-defined data retrieval and transformation policies to enable intelligent, cross-run data sharing.
 * **FR-8**: The system shall automatically detect any change to a component function's source code.
 * **FR-9**: The system shall provide a utility to perform garbage collection, deleting any cached data that is not reachable from a given pipeline configuration, in order to reclaim storage space.
+* **FR-10**: The system shall provide a logging mechanism that can output to both the MATLAB Command Window and an optional log file, as specified in the configuration.
+* **FR-11**: The system shall support at least three named verbosity levels (`'info'`, `'debug'`, `'silent'`) for logging, with separate controls for console and file outputs.
+* **FR-12**: The system shall support two user-configurable error handling modes: `'resilient'` (continue executing independent jobs upon failure) and `'fail_fast'` (terminate immediately upon any failure).
+* **FR-13**: In resilient mode, the system shall log all errors from failed jobs and provide a final summary report of all job statuses (`SUCCEEDED`, `CACHED`, `FAILED`, `CANCELLED`).
 
 ---
 

@@ -1,6 +1,6 @@
 # Architecture Design Document: General-Purpose Scientific Pipeline Framework
 
-**Version:** 0.14.0
+**Version:** 0.17.0
 **Date:** 2025-07-22
 
 ---
@@ -60,14 +60,16 @@ The framework consists of several key internal components that work together.
 
 ### 3.1. The Pipeline Executor (Stateful Task-Based Scheduler)
 
-The Executor is a stateful, task-based scheduler, chosen for its maximal parallel efficiency over simpler "wave-based" or "recursive" alternatives.
+The Executor is a stateful, task-based scheduler. Its workflow is as follows:
 
-Its workflow is as follows:
-
-1. **Initialization:** Builds a **Job Registry** of every task (`(stage, run)`) for the experiment. Each job tracks its dependencies and status (`WAITING`, `READY`, `RUNNING`, `COMPLETE`).
-2. **Graph Analysis:** Constructs a dependency graph and performs a topological sort to validate it as a DAG.
-3. **Task Scheduling:** The Executor's main loop continuously monitors the Job Registry, submitting any job whose status becomes `READY` to a parallel worker pool for asynchronous execution.
-4. **State Update:** When a worker completes a job, it reports back. The Executor marks the job as `COMPLETE`, caches the result via the Storage Manager, and updates the status of all dependent jobs, potentially unlocking new jobs to become `READY`.
+1. **Initialization:** Loads the configuration object, validates its structure, and generates the list of parameter runs.
+2. **Graph Analysis:** Constructs a dependency graph from `config.stages` and performs a topological sort to create a valid execution plan and detect cycles.
+3. **Task Scheduling:** Operates as a state machine, managing a registry of all jobs and their statuses (`WAITING`, `READY`, `RUNNING`, `COMPLETE`, `FAILED`, `CANCELLED`). It continuously submits `READY` jobs to a parallel worker pool.
+4. **State Update and Error Handling:** When a worker completes a job, the Executor updates the state of all dependent jobs. If a job fails:
+    * It is marked as `FAILED`. The error is logged.
+    * If `config.error_mode` is `'fail_fast'`, the Executor terminates the entire pipeline.
+    * If `config.error_mode` is `'resilient'`, the Executor traverses the graph downstream from the failed job, marks all its dependents as `CANCELLED`, and continues executing other independent branches.
+5. **Reporting:** At the end of the run, the Executor provides a summary report of all job statuses.
 
 ### 3.2. The Configuration
 
@@ -97,6 +99,13 @@ The `.storage_policy` field supports three options:
 * `'persistent'`: (Default) The output is always saved to the persistent HDF5 store.
 * `'memory_only'`: The output is only kept in memory for the duration of the pipeline run.
 * **Function Handle:** A handle to a boolean function (`@(p, all) ...`) for defining complex, conditional storage rules.
+
+#### Logging and Error Configuration
+
+The `config` struct also contains fields for controlling execution behavior:
+
+* **`config.logging`**: A struct containing logging settings (`.console_level`, `.file_level`, `.filepath`).
+* **`config.error_mode`**: A string, either `'resilient'` (default) or `'fail_fast'`.
 
 ### 3.3. The Dependency Recipe and Resolver
 
@@ -153,6 +162,17 @@ User-provided scientific code must be written as stateless functions.
 * They must not perform any file I/O or access global state, ensuring they are pure and reproducible.
 
 ---
+
+## 3.6. The Logging System
+
+To provide clear feedback to the user, the framework implements a flexible, dual-output logging system.
+
+* **Outputs:** The logger can write to two destinations simultaneously: the MATLAB Command Window and a user-specified log file. The log file is optional; if `config.logging.filepath` is not provided, output is sent only to the console.
+* **Verbosity Levels:** The system supports three named levels, configurable independently for the console and the file:
+  * `'info'` (Default): Provides a high-level summary of progress, including which jobs are starting, finishing, and whether they were cached.
+  * `'debug'`: A verbose output for developers, including detailed information like Provenance Hashes and resolver steps.
+  * `'silent'`: Suppresses all output except for fatal errors and the final summary.
+* **Error Logging:** All errors caught by the Executor are logged with their full message and stack trace, regardless of the verbosity level, to ensure critical information is never lost.
 
 ## 4. Source Code and Project Structure
 
