@@ -1,0 +1,79 @@
+# ===================================================================
+# Global .gitignore for MATLAB Projects
+#
+# Covers MATLAB/Simulink generated files, large data,
+# build artifacts, and VS Code settings.
+# ===================================================================
+
+# MATLAB Drive sync files and temporary files
+.MATLAB*
+*~
+
+# MATLAB & Simulink Generated Files
+# ---------------------------------
+# Autosave files
+*.asv
+
+# MATLAB log files
+*.log
+
+# Simulink model cache files
+*.slxc
+*.slx.original
+*.mdl.original
+*.bak
+
+# MATLAB Coder and code generation artifacts
+codegen/
+slprj/
+*_ert_rtw/
+*_grt_rtw/
+*_slrt_rtw/
+
+# Compiled MEX files (platform-specific binaries)
+*.mex*
+*.pdb
+*.ilk
+
+# MATLAB Project files (user-specific paths)
+*.prj
+*.mlproj
+
+# MATLAB App Designer files
+*.mlappinstall
+
+# Large Data Files (optional but recommended)
+# --------------------------------------------
+# Uncomment if you want to ignore all .mat files.
+# It's often better to be specific and ignore only large data files by name.
+# *.mat
+# Example: Ignore a specific large data file
+# large_dataset.mat
+
+# Build artifacts
+# -----------------
+build/
+dist/
+bin/
+
+# VS Code Editor Specific
+# -----------------------
+# Local settings, history, and workspace files
+.vscode/
+.history/
+
+# Operating System Files
+# ----------------------
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+havok/data_extended_hankel/havok_unified_results.h5
+data_pipeline/havok_modular_results.h5
+data_pipeline/havok_modular_results_copy.h5
