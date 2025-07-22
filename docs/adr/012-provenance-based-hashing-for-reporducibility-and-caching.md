@@ -23,22 +23,22 @@ This single, consistent formula is the foundation for all caching and dependency
 
 This approach is the most elegant solution because its single, consistent hashing rule gracefully handles all required scenarios, from simple pipelines to complex computational graphs.
 
-#### 1. Solves the Cache Lookup Problem
+### 1. Solves the Cache Lookup Problem
 
 By hashing the *inputs* to a computation (its provenance), we can generate an expected hash and check for its existence in the cache **before** running the expensive computation itself. This is the fundamental mechanism that enables computational efficiency.
 
-#### 2. Guarantees Reproducibility via Cascading Invalidation
+### 2. Guarantees Reproducibility via Cascading Invalidation
 
 Including the hashes of all inputs in a stage's own hash creates a chain of cryptographic dependency. A change to any upstream stage (its code or parameters) will change its hash, which in turn changes the hash of all its direct and indirect dependents. This automatic **cascading invalidation** guarantees that no stage ever runs with stale data.
 
-#### 3. Handles Complex Graph Structures Deterministically
+### 3. Handles Complex Graph Structures Deterministically
 
 The hashing rule is applied consistently regardless of the graph's shape:
 
 * **Fan-in and Global Stages:** For a stage with multiple inputs (e.g., a fan-in node or a global barrier that depends on 100 per-run results), the framework gathers the Provenance Hashes of all inputs into a list. This list is **alphabetically sorted** before being hashed. This ensures the final hash is deterministic and independent of the order in which the parallel jobs complete.
 * **Multi-Output Stages:** A stage that produces multiple outputs (e.g., `U`, `S`, `V` from an SVD) is treated as a single computational event. The framework calculates **one** Provenance Hash for the event and stores the entire result set (e.g., a struct of outputs) under that single hash. Downstream stages use the Resolver to request specific fields from this result set.
 
-#### 4. Manages Mixed-Scope and Transformed Inputs Elegantly
+### 4. Manages Mixed-Scope and Transformed Inputs Elegantly
 
 The system does not need a special mechanism for "global" or "transformed" inputs. These are simply data products with their own valid provenance.
 
