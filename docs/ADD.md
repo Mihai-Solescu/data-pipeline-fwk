@@ -115,7 +115,27 @@ Dependencies are defined programmatically using a fluent, object-oriented interf
     2. The hash of a deterministically sorted list of the Provenance Hashes of all direct inputs.
     3. A hash of the specific subset of parameters defined in `.param_dependencies`.
 
-#### Garbage Collection
+#### 3.4.1. The Caching Mechanism
+
+To ensure high performance and parallel safety, the `StorageManager` implements a **dual-layer caching system**.
+
+1. **In-Memory Cache (L1):** A fast, temporary cache that exists for the duration of a single `pipeline.run()` execution. It is implemented using a `containers.Map`, where the key is the Provenance Hash and the value is the MATLAB data object.
+
+2. **Persistent Cache (L2):** The long-term, on-disk HDF5 file.
+
+The `StorageManager` follows a strict logic for all `load` and `save` operations:
+
+* **On `load(hash)`:**
+    1. The `StorageManager` first checks the **L1 in-memory cache**. If the hash exists, the object is returned instantly.
+    2. If not found in memory, it checks the **L2 persistent cache** (the HDF5 file).
+    3. If the data is found on disk, it is loaded, **promoted to the L1 cache** for future fast access, and then returned.
+    4. If the data is not found anywhere, the load fails, signaling to the Executor that a computation is required.
+
+* **On `save(hash, data, policy)`:**
+    1. The new data is **always written to the L1 in-memory cache first**. This makes the result immediately available to any downstream dependents.
+    2. The `StorageManager` then evaluates the `storage_policy`. If the policy requires persistence, the data is queued for writing to the L2 cache. All writes to the HDF5 file are serialized by the main Executor thread to prevent race conditions.
+
+#### 3.4.2 Garbage Collection
 
 Because the storage strategy never overwrites data, a separate utility is required to manage storage space.
 
