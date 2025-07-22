@@ -1,6 +1,6 @@
 # Architecture Design Document: General-Purpose Scientific Pipeline Framework
 
-**Version:** 0.17.0
+**Version:** 0.18.0
 **Date:** 2025-07-22
 
 ---
@@ -70,6 +70,19 @@ The Executor is a stateful, task-based scheduler. Its workflow is as follows:
     * If `config.error_mode` is `'fail_fast'`, the Executor terminates the entire pipeline.
     * If `config.error_mode` is `'resilient'`, the Executor traverses the graph downstream from the failed job, marks all its dependents as `CANCELLED`, and continues executing other independent branches.
 5. **Reporting:** At the end of the run, the Executor provides a summary report of all job statuses.
+
+#### 3.1.1. Configuration Validation Routine
+
+The Executor's "Fail-Fast" validation is performed in three phases:
+
+1. **Schema and Structural Validation:** Checks the basic "grammar" of the configuration (e.g., required fields, data types, unique names).
+2. **Graph and Logical Validation:** Checks the "meaning" and integrity of the workflow, including:
+    * Verifying the dependency graph is a valid DAG via topological sort.
+    * Ensuring all dependency recipes and parameter links are valid (e.g., a `.where('rank', ...)` clause refers to an existing parameter).
+    * Confirming the parameter sweep will result in at least one run.
+3. **Environment Validation:** Checks for external prerequisites, such as:
+    * The existence and licensing of required toolboxes (e.g., Parallel Computing Toolbox).
+    * Write permissions for the specified storage path.
 
 ### 3.2. The Configuration
 

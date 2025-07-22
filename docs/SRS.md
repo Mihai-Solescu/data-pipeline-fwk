@@ -1,6 +1,6 @@
 # Software Requirements Specification: General-Purpose Scientific Pipeline Framework
 
-**Version:** 0.17.0
+**Version:** 0.18.0
 **Date:** 2025-07-22
 
 ---
@@ -73,6 +73,7 @@ To create a modular, reusable, and efficient MATLAB framework for executing comp
 * **FR-11**: The system shall support at least three named verbosity levels (`'info'`, `'debug'`, `'silent'`) for logging, with separate controls for console and file outputs.
 * **FR-12**: The system shall support two user-configurable error handling modes: `'resilient'` (continue executing independent jobs upon failure) and `'fail_fast'` (terminate immediately upon any failure).
 * **FR-13**: In resilient mode, the system shall log all errors from failed jobs and provide a final summary report of all job statuses (`SUCCEEDED`, `CACHED`, `FAILED`, `CANCELLED`).
+* **FR-14**: The system shall perform a comprehensive validation of the user-provided configuration at startup. If any validation check fails, the pipeline must terminate immediately with a clear and informative error message.
 
 ---
 
