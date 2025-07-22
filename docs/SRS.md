@@ -1,6 +1,6 @@
 # Software Requirements Specification: General-Purpose Scientific Pipeline Framework
 
-**Version:** 0.10.0
+**Version:** 0.13.0
 **Date:** 2025-07-22
 
 ---
@@ -37,7 +37,7 @@ To create a modular, reusable, and efficient MATLAB framework for executing comp
 
 * A generic pipeline executor engine.
 * A configuration system for defining parameter sweeps and a computational dependency graph.
-* Management of a single-file, HDF5-based storage backend.
+* Management of a single-file, HDF5-based storage backend, including a garbage collection utility.
 * An in-memory caching mechanism for a single pipeline run.
 * Automatic dependency checking and result invalidation based on content hashing.
 * Validation that the stage dependencies form a Directed Acyclic Graph (DAG).
@@ -65,7 +65,8 @@ To create a modular, reusable, and efficient MATLAB framework for executing comp
 * **FR-5**: The system shall support singleton (setup), per-run, and global (barrier) stage execution modes.
 * **FR-6**: The system shall allow users to define conditional storage policies for stage outputs.
 * **FR-7**: The system shall support advanced, user-defined data retrieval and transformation policies to enable intelligent, cross-run data sharing.
-* **FR-8**: The system shall automatically detect any change to a component function's source code. A change in a stage's code must invalidate its cached result and trigger re-computation for itself and all downstream dependents.
+* **FR-8**: The system shall automatically detect any change to a component function's source code.
+* **FR-9**: The system shall provide a utility to perform garbage collection, deleting any cached data that is not reachable from a given pipeline configuration, in order to reclaim storage space.
 
 ---
 

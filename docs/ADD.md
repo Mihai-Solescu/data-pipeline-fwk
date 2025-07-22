@@ -1,18 +1,19 @@
 # Architecture Design Document: General-Purpose Scientific Pipeline Framework
 
-**Version:** 0.12.0
+**Version:** 0.14.0
 **Date:** 2025-07-22
 
 ---
 
 ## 1. Architectural Principles
 
-Our architecture is guided by the project's philosophy, translated into technical rules:
+Our architecture is guided by a core philosophy, translated into five technical rules:
 
-1. **Separation of Concerns:** The Executor engine is strictly decoupled from user-provided component functions.
-2. **Declarative Configuration:** The entire workflow is defined in a MATLAB configuration file.
-3. **Native Syntax:** Interfaces prefer idiomatic MATLAB patterns (programmatic recipes, function handles) over custom languages.
-4. **Provenance-Based Caching:** All data is stored and retrieved based on a hash of its provenance, not its location or name.
+1. **MATLAB-Native Experience:** The framework must feel like a natural extension of MATLAB. All user-facing interfaces will use idiomatic MATLAB syntax (e.g., programmatic recipes, function handles) over custom string-based languages.
+2. **Uncompromising Reproducibility:** Every result must be verifiably reproducible. Caching is not just for speed; it is a guarantee of correctness, achieved through provenance-based hashing.
+3. **Declarative Configuration as Code:** Users will declare *what* the pipeline should do in a version-controllable MATLAB file, separating the workflow definition from the execution engine.
+4. **Aggressive Separation of Concerns:** A strict separation will be maintained between scientific logic (in component functions), optimization logic (in dependency recipes), and framework logic (in the executor).
+5. **Flexible and Composable Data Flow:** The framework is a toolkit for building complex computational graphs. The dependency system is designed as a powerful query language to support non-linear workflows with shared sources, branches, and mixed-scope dependencies.
 
 ---
 
@@ -57,43 +58,71 @@ This enables a robust workflow for researchers using Git: when a user switches b
 
 The framework consists of several key internal components that work together.
 
-### 3.1. The Pipeline Executor
+### 3.1. The Pipeline Executor (Stateful Task-Based Scheduler)
 
-The Executor is the central engine. Its workflow is as follows:
+The Executor is a stateful, task-based scheduler, chosen for its maximal parallel efficiency over simpler "wave-based" or "recursive" alternatives.
 
-1. **Initialization:** Loads the configuration object and generates the list of all parameter runs.
-2. **Graph Analysis:** Constructs a dependency graph from the `config.stages` collection and performs a topological sort to create a valid execution plan and detect cycles.
-3. **Task Scheduling:** Operates as a task-based scheduler. It identifies all individual jobs (a stage for a given run) and submits ready jobs (whose dependencies are met) to a worker pool managed by the Parallel Computing Toolbox.
-4. **Execution:** For each job, it uses the **Resolver** to gather inputs, checks the **Storage Manager** for a cached result, and if necessary, executes the component function. It then uses the **Storage Manager** to save the results according to the defined storage policy.
+Its workflow is as follows:
+
+1. **Initialization:** Builds a **Job Registry** of every task (`(stage, run)`) for the experiment. Each job tracks its dependencies and status (`WAITING`, `READY`, `RUNNING`, `COMPLETE`).
+2. **Graph Analysis:** Constructs a dependency graph and performs a topological sort to validate it as a DAG.
+3. **Task Scheduling:** The Executor's main loop continuously monitors the Job Registry, submitting any job whose status becomes `READY` to a parallel worker pool for asynchronous execution.
+4. **State Update:** When a worker completes a job, it reports back. The Executor marks the job as `COMPLETE`, caches the result via the Storage Manager, and updates the status of all dependent jobs, potentially unlocking new jobs to become `READY`.
 
 ### 3.2. The Configuration
 
-This is a MATLAB struct (we call it `config`). It defines the parameter space and the computational graph. The order of stages in the `config.stages` array does not matter.
+The `config` struct defines the entire workflow. It contains two main parts: the parameter space and the computational graph.
 
-A stage is defined by a struct with fields including:
+#### Parameter Space Definition
+
+* **`config.param_mode`** (string, optional): Specifies the method for generating parameter runs. Defaults to `'grid'`.
+  * `'grid'`: The framework generates the Cartesian product of all parameter values defined in `config.parameters`.
+  * `'list'`: The framework uses an explicitly defined list of runs from `config.runs`.
+* **`config.parameters`** (struct): Used when `param_mode` is `'grid'`. Each field name corresponds to a parameter, and its value is an array of the values to be tested.
+* **`config.runs`** (struct array): Used when `param_mode` is `'list'`. Each element of the array is a struct defining one specific parameter combination.
+* **`config.param_filter`** (function handle, optional): A handle to a function that filters the generated parameter runs. It must accept a single run struct and return `true` to keep it.
+
+#### Stage Definition
+
+The `config.stages` array defines the computational graph. A stage in the `config.stages` array is defined by a struct with fields including:
 
 * `.name`: A unique string identifier.
 * `.function`: A function handle to the stateless component.
 * `.dependencies`: A struct mapping input names to **Dependency Recipes**.
 * `.param_dependencies`: A cell array of strings listing the parameters the stage depends on for granular hashing.
-* `.outputs`: A cell array of structs, where each struct defines an output's `.name` and `.storage_policy` (`'persistent'`, `'memory_only'`, or a function handle).
+* `.outputs`: A cell array of structs, where each struct defines an output's `.name` and `.storage_policy`.
+
+The `.storage_policy` field supports three options:
+
+* `'persistent'`: (Default) The output is always saved to the persistent HDF5 store.
+* `'memory_only'`: The output is only kept in memory for the duration of the pipeline run.
+* **Function Handle:** A handle to a boolean function (`@(p, all) ...`) for defining complex, conditional storage rules.
 
 ### 3.3. The Dependency Recipe and Resolver
 
-To ensure a flexible and MATLAB-native interface, dependencies are defined programmatically using a fluent interface provided by the **Resolver**.
+Dependencies are defined programmatically using a fluent, object-oriented interface. This was chosen over URI strings or static structs for its superior readability, safety, and extensibility.
 
-* **Role:** The Resolver translates a dependency recipe into a specific **Provenance Hash**.
+* **Role:** The **Resolver** is a component that translates a dependency recipe into a specific **Provenance Hash**.
 * **Syntax:** `resolver.get('source_stage').where(...).transform(...)`
-* **Functionality:** The recipe specifies what data to get, the policy for retrieving it (e.g., finding a result based on a condition), and any in-line transformations (e.g., truncation) to apply before passing it to the consuming stage.
+* **Functionality:** The recipe specifies what data to get, the policy for retrieving it (including cross-run and global lookups), and any in-line transformations (e.g., truncation) to apply before passing it to the consuming stage.
 
 ### 3.4. The Storage System
 
-* **Storage Manager:** A component responsible for the physical reading and writing of data to either the in-memory cache or the persistent HDF5 file, given a specific Provenance Hash.
-* **Provenance-Based Caching:** The HDF5 backend acts as a key-value store. Data is stored in a flat `/data/` group, where each entry's name is its unique Provenance Hash. This prevents data conflicts and enables version-aware caching.
+* **Storage Manager:** A component responsible for the physical reading and writing of data to either the in-memory cache or the persistent HDF5 file.
+* **Provenance-Based Caching:** The HDF5 backend acts as a key-value store where data is stored in a flat `/data/` group, indexed by its unique Provenance Hash. A single computational event that produces multiple outputs (e.g., `U, S, V`) results in one Provenance Hash and one stored result set (e.g., a struct).
 * **Provenance Hash:** A unique fingerprint derived from three sources:
     1. The hash of the component function's M-file.
-    2. The Provenance Hashes of all direct inputs (enabling cascading invalidation).
+    2. The hash of a deterministically sorted list of the Provenance Hashes of all direct inputs.
     3. A hash of the specific subset of parameters defined in `.param_dependencies`.
+
+#### Garbage Collection
+
+Because the storage strategy never overwrites data, a separate utility is required to manage storage space.
+
+* **API:** `pipeline.gc(config)`
+* **Algorithm (Mark and Sweep):**
+  * **Mark:** The utility first identifies the complete set of all "live" Provenance Hashes that are reachable from the *current* `pipeline_config.m`.
+  * **Sweep:** It then scans the storage backend. Any data whose hash is not in the "live" set is considered orphaned and is deleted, reclaiming storage space.
 
 ### 3.5. Stateless Components
 
@@ -106,8 +135,6 @@ User-provided scientific code must be written as stateless functions.
 ---
 
 ## 4. Source Code and Project Structure
-
-To ensure maintainability, testability, and a clean separation between the public API and internal logic, the framework's source code is organized into a standard package structure.
 
 The project root directory is laid out as follows:
 
@@ -126,6 +153,7 @@ data-pipeline-framework/
 │   │
 │   ├── get.m
 │   ├── run.m
+│   ├── gc.m
 │   └── Recipe.m
 │
 ├── docs/
@@ -143,11 +171,8 @@ data-pipeline-framework/
 
 ### Component Roles
 
-* **`+pipeline/`**: The main package folder. This creates the `pipeline` namespace and contains all user-facing API components.
-  * **`run.m`**: The primary entry point for executing a pipeline.
-  * **`get.m`**: The factory function for creating a dependency recipe.
-  * **`Recipe.m`**: The class defining the fluent interface for dependency recipes.
-* **`+pipeline/+internal/`**: A nested subpackage for all core engine components. This makes the implementation details private and inaccessible from the user's workspace, preventing misuse and creating a stable public API.
-* **`docs/`**: Contains all project documentation, including the SRS, this ADD, and the ADR log.
-* **`examples/`**: Contains one or more self-contained example projects that demonstrate how to use the framework.
-* **`tests/`**: Contains all unit and integration tests for the framework's internal components.
+* **`+pipeline/`**: The main package folder containing the public API (`run`, `get`, `gc`).
+* **`+pipeline/+internal/`**: A nested subpackage for all private core engine components.
+* **`docs/`**: Contains all project documentation.
+* **`examples/`**: Contains self-contained example projects.
+* **`tests/`**: Contains all unit and integration tests.
