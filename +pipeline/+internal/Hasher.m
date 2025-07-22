@@ -31,9 +31,13 @@ classdef Hasher
                 % Convert the hash bytes to a lowercase hexadecimal string
                 sha256_hash = lower(sprintf('%02x', typecast(hash_bytes, 'uint8')));
             catch ME
-                % Rethrow with a more informative error message
-                error('Hasher:JavaError', 'Failed to compute hash for file %s. Details: %s', ...
-                      filePath, ME.message);
+                % Re-throw file errors as-is, but wrap other errors as JavaError
+                if strcmp(ME.identifier, 'Hasher:FileError')
+                    rethrow(ME);
+                else
+                    error('Hasher:JavaError', 'Failed to compute hash for file %s. Details: %s', ...
+                          filePath, ME.message);
+                end
             end
         end
 

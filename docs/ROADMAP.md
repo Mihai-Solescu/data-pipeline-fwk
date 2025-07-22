@@ -1,4 +1,4 @@
-# Project Roadmap: General-Purpose Scientific Pipeline Framewor
+# Project Roadmap: General-Purpose Scientific Pipeline Framework
 
 **Version:** 1.1.0
 **Methodology:** Test-Driven Development (TDD)
@@ -12,36 +12,36 @@ This document provides a detailed, atomic, and test-driven implementation plan. 
 
 **Goal:** Establish a deterministic and reliable foundation for the entire framework.
 
-- [ ] **Task 1.1: Initialize Project Structure**
-  - [ ] **Action:** Create the full directory structure as defined in the [ADD, Section 5](ADD.md#5-source-code-and-project-structure) (`+pipeline/+internal`, `docs`, `tests`, `examples`).
-  - [ ] **Action:** Initialize the Git repository and add a `.gitignore` file for MATLAB artifacts (e.g., `*.asv`, `slprj/`).
+- [x] **Task 1.1: Initialize Project Structure**
+  - [x] **Action:** Create the full directory structure as defined in the [ADD, Section 5](ADD.md#5-source-code-and-project-structure) (`+pipeline/+internal`, `docs`, `tests`, `examples`).
+  - [x] **Action:** Initialize the Git repository and add a `.gitignore` file for MATLAB artifacts (e.g., `*.asv`, `slprj/`).
 
-- [ ] **Task 1.2: Implement the `Hasher` Utility**
+- [x] **Task 1.2: Implement the `Hasher` Utility**
   - **Key Concepts:**
     - [SHA-256 Cryptographic Hash Functions](https://en.wikipedia.org/wiki/SHA-2)
     - [MATLAB-Java Interface](https://www.mathworks.com/help/matlab/matlab_external/j-ava-libraries-and-matlab.html)
     - [MATLAB `getByteStreamFromArray`](https://www.mathworks.com/help/matlab/ref/getbytestreamfromarray.html)
 
-  - [ ] **Sub-Task 1.2.1: Test `hash_file`**
+  - [x] **Sub-Task 1.2.1: Test `hash_file`**
     - **TDD:** In `tests/test_Hasher.m`, write a test case that:
             1. Creates two identical temporary text files and one different one.
             2. Asserts that the hashes of the identical files are equal.
             3. Asserts that the hashes of the different files are not equal.
             4. Asserts that the hash of a known file content matches a pre-computed, known SHA-256 hash.
 
-  - [ ] **Sub-Task 1.2.2: Implement `hash_file`**
+  - [x] **Sub-Task 1.2.2: Implement `hash_file`**
     - **Action:** In `+pipeline/+internal/Hasher.m`, create the static method `hash_file(filePath)`. Implement it using the `java.security.MessageDigest` class to compute the SHA-256 hash of the file's raw bytes.
 
-  - [ ] **Sub-Task 1.2.3: Test `hash_data`**
+  - [x] **Sub-Task 1.2.3: Test `hash_data`**
     - **TDD:** In `tests/test_Hasher.m`, write test cases for various MATLAB data types (double, string, struct) asserting that identical data produces identical hashes.
 
-  - [ ] **Sub-Task 1.2.4: Implement `hash_data`**
+  - [x] **Sub-Task 1.2.4: Implement `hash_data`**
     - **Action:** In `+pipeline/+internal/Hasher.m`, create the static method `hash_data(data)`. Implement it using `getByteStreamFromArray` to serialize the data, then hash the resulting byte stream with the Java `MessageDigest`.
 
-  - [ ] **Sub-Task 1.2.5: Test `hash_struct`**
+  - [x] **Sub-Task 1.2.5: Test `hash_struct`**
     - **TDD:** In `tests/test_Hasher.m`, write a test case that creates two structs with the same fields and values but in a different order of definition. Assert that `hash_struct` produces the exact same hash for both.
 
-  - [ ] **Sub-Task 1.2.6: Implement `hash_struct`**
+  - [x] **Sub-Task 1.2.6: Implement `hash_struct`**
     - **Action:** In `+pipeline/+internal/Hasher.m`, create the static method `hash_struct(s)`. Implement it by sorting the struct's field names alphabetically, creating a new struct in that order, and then calling `hash_data` on the sorted struct.
 
 ---
