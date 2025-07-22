@@ -101,7 +101,7 @@ To ensure maintainability, testability, and a clean separation between the publi
 
 The project root directory is laid out as follows:
 
-```
+```text
 data-pipeline-framework/
 │
 ├── +pipeline/
