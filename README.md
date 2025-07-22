@@ -1,7 +1,7 @@
 # A General-Purpose Scientific Pipeline Framework for MATLAB
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Status: In Development](https://img.shields.io/badge/status-in_development-orange.svg)](https://github.com/Mihai-Solescu/data-pipeline-fwk)
+[![Status: In Development](https://img.shields.io/badge/status-in_development-orange.svg)](./docs/ROADMAP.md)
 
 A modular, reproducible, and efficient MATLAB framework for executing complex, multi-stage scientific computing workflows. This framework acts as a "build system" for data analysis, designed to accelerate research by automating parameter sweeps, guaranteeing reproducibility, and eliminating redundant computations through intelligent, provenance-based caching.
 
