@@ -4,8 +4,18 @@ classdef test_Hasher < matlab.unittest.TestCase
     % hash_file, hash_data, and hash_struct according to TDD requirements.
     
     properties (TestParameter)
-        % Test data for various MATLAB types
-        test_data = {42, 'hello', [1, 2, 3], struct('a', 1, 'b', 2)}
+    % Test data for various MATLAB types
+    test_data = {42, ...                   % double scalar
+                 'hello', ...              % char array
+                 [1, 2, 3], ...            % double vector
+                 struct('a', 1, 'b', 2), ...% struct
+                 true, ...                 % logical
+                 NaN, ...                  % special numeric
+                 Inf, ...                  % special numeric
+                 [], ...                   % empty double
+                 {}, ...                   % empty cell
+                 'test string', ...        % string array
+                 complex(1, 2)}            % complex number
     end
     
     properties
@@ -273,5 +283,20 @@ classdef test_Hasher < matlab.unittest.TestCase
                 'Nested structs should produce consistent hashes');
         end
         
+        function test_hash_file_binary_content(testCase)
+            % Test that binary files can be hashed
+            binContent = uint8([1 2 10 255 0 13]);
+            testFile = fullfile(testCase.tempDir, 'test.bin');
+            
+            fid = fopen(testFile, 'wb');
+            fwrite(fid, binContent, 'uint8');
+            fclose(fid);
+            
+            hash1 = pipeline.internal.Hasher.hash_file(testFile);
+            hash2 = pipeline.internal.Hasher.hash_file(testFile);
+            
+            testCase.verifyNotEmpty(hash1);
+            testCase.verifyEqual(hash1, hash2, 'Binary file hashing should be deterministic.');
+        end
     end
 end
