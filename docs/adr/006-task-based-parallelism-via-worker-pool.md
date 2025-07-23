@@ -1,4 +1,4 @@
-# ADR-006: Task-Based Parallelism via a Worker Pool
+# ADR-006: Task-Based Parallelism via Worker Pool
 
 **Status:** Accepted
 **Date:** 2025-07-19
