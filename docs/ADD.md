@@ -1,6 +1,6 @@
 # Architecture Design Document: General-Purpose Scientific Pipeline Framework
 
-**Version:** 0.18.0
+**Version:** 0.21.0
 **Date:** 2025-07-22
 
 ---
@@ -139,29 +139,28 @@ The Storage System is composed of the `StorageManager` component and the HDF5 ba
     2. The hash of a deterministically sorted list of the Provenance Hashes of all direct inputs.
     3. A hash of the specific subset of parameters defined in `.param_dependencies`.
 
-#### 3.4.1. The Caching Mechanism and Immutability
+#### 3.4.1. The Caching Mechanism and API
 
-To ensure high performance and parallel safety, the `StorageManager` implements a **dual-layer caching system** and enforces a **strict immutability contract** on the persistent store.
+The `StorageManager` implements a **dual-layer caching system** and a strict API to ensure performance and parallel safety.
 
-1. **In-Memory Cache (L1):** A fast, temporary cache that exists for the duration of a single `pipeline.run()` execution. It is implemented using a `containers.Map`, where the key is the Provenance Hash and the value is the MATLAB data object. This cache is overwrite-able to handle the immediate results from parallel workers.
+1. **In-Memory Cache (L1):** A `containers.Map` that exists for the duration of a single `pipeline.run()` execution, holding all data for the current run.
+2. **Persistent Cache (L2):** The long-term, on-disk HDF5 file, treated as a **Write-Once-Read-Many (WORM)** store.
 
-2. **Persistent Cache (L2):** The long-term, on-disk HDF5 file. This cache is treated as a **Write-Once-Read-Many (WORM)** store, enforcing the principle of immutability.
+The `StorageManager`'s public API for data manipulation is as follows:
 
-The `StorageManager` follows a strict logic for all operations, which are called by the Orchestrator:
+* **`load(hash)`:**
+    1. Checks the **L1 in-memory cache**. If the hash exists, the object is returned instantly.
+    2. If not found, it checks the **L2 persistent cache**.
+    3. If found in L2, it loads the data, **promotes it to the L1 cache** for future fast access, and then returns it.
+    4. If not found anywhere, the load fails, signaling to the Executor that a computation is required.
 
-* **On `load(hash)`:**
-    1. The `StorageManager` first checks the **L1 in-memory cache**. If the hash exists, the object is returned instantly.
-    2. If not found in memory, it checks the **L2 persistent cache**.
-    3. If the data is found on disk, it is loaded, **promoted to the L1 cache** for future fast access, and then returned.
-    4. If the data is not found anywhere, the load fails, signaling to the Executor that a computation is required.
+* **`cache(hash, data)`:**
+  * This method's only responsibility is to write the provided data object to the **L1 in-memory cache**. It is called by the `Orchestrator` for every newly computed result.
 
-* **On `cache(hash, data)` (called by the Orchestrator for every new result):**
-    1. The new data is written to the **L1 in-memory cache**. This makes the result immediately available to any downstream dependents within the current run. If a key already exists (indicating a race condition from a non-pure function), it will be overwritten.
-
-* **On `persist(hash, data)` (called by the Orchestrator *after* evaluating a storage policy):**
-    1. The `StorageManager` first checks if the hash already exists in the **L2 persistent cache**.
-    2. If it exists, this signifies a critical architectural violation (e.g., a non-deterministic hash or a non-pure function). The `StorageManager` will **throw a fatal `StorageManager:OverwriteAttempt` error** and terminate the operation.
-    3. If it does not exist, the data is written to the HDF5 file.
+* **`persist(hash)`:**
+  * This method's only responsibility is to promote data from the L1 cache to the L2 persistent store.
+  * It takes only a hash, retrieves the corresponding data from the L1 cache, and writes it to the HDF5 file.
+  * It enforces immutability: if the hash already exists in the L2 cache, this method will **throw a fatal `StorageManager:OverwriteAttempt` error**.
 
 #### 3.4.2. Garbage Collection
 
