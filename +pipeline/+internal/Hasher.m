@@ -20,7 +20,7 @@ classdef Hasher
                 % Read the entire file into a raw byte array
                 fid = fopen(filePath, 'rb');
                 if fid == -1
-                    error('Hasher:FileError', 'Could not open file: %s', filePath);
+                    error('pipeline:Hasher:FileError', 'Could not open file: %s', filePath);
                 end
                 bytes = fread(fid, '*uint8');
                 fclose(fid);
@@ -32,10 +32,10 @@ classdef Hasher
                 sha256_hash = lower(sprintf('%02x', typecast(hash_bytes, 'uint8')));
             catch ME
                 % Re-throw file errors as-is, but wrap other errors as JavaError
-                if strcmp(ME.identifier, 'Hasher:FileError')
+                if strcmp(ME.identifier, 'pipeline:Hasher:FileError')
                     rethrow(ME);
                 else
-                    error('Hasher:JavaError', 'Failed to compute hash for file %s. Details: %s', ...
+                    error('pipeline:Hasher:JavaError', 'Failed to compute hash for file %s. Details: %s', ...
                           filePath, ME.message);
                 end
             end
@@ -62,7 +62,7 @@ classdef Hasher
                 % Convert to a lowercase hexadecimal string
                 sha256_hash = lower(sprintf('%02x', typecast(hash_bytes, 'uint8')));
             catch ME
-                error('Hasher:DataHashError', 'Failed to compute hash for data. Details: %s', ...
+                error('pipeline:Hasher:DataHashError', 'Failed to compute hash for data. Details: %s', ...
                       ME.message);
             end
         end
@@ -78,7 +78,7 @@ classdef Hasher
             % This is critical for granular parameter hashing.
 
             if ~isstruct(s)
-                error('Hasher:InputError', 'Input must be a struct.');
+                error('pipeline:Hasher:InputError', 'Input must be a struct.');
             end
 
             % Get field names and sort them alphabetically
