@@ -40,7 +40,8 @@ While many workflow tools exist, this framework is purpose-built to address the 
 The entire workflow is controlled by a simple configuration and a single command.
 
 **1. Define your workflow in `my_pipeline_config.m`:**
-'''matlab
+
+```matlab
 function config = my_pipeline_config()
     % Define parameters...
     config.parameters.rank = [10, 20, 50];
@@ -56,14 +57,15 @@ function config = my_pipeline_config()
                 .where('rank', @max) ...
                 .transform(@(data, params) ...); % Truncation logic
 end
-'''
+```
 
 **2. Run it from your main script:**
-'''matlab
+
+```matlab
 % In main_runner.m
 config = my_pipeline_config();
 results = pipeline.run(config);
-'''
+```
 
 ## Documentation
 
