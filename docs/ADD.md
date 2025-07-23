@@ -130,36 +130,42 @@ Dependencies are defined programmatically using a fluent, object-oriented interf
 
 ### 3.4. The Storage System
 
-* **Storage Manager:** A component responsible for the physical reading and writing of data to either the in-memory cache or the persistent HDF5 file.
+The Storage System is composed of the `StorageManager` component and the HDF5 backend. It is designed around the principles of high performance, parallel safety, and uncompromising data integrity.
+
+* **Storage Manager:** A component responsible for the physical reading and writing of data. It has a simple, explicit API and manages the dual-layer cache. It does **not** evaluate high-level storage policies; it only executes direct commands from the Orchestrator.
 * **Provenance-Based Caching:** The HDF5 backend acts as a key-value store where data is stored in a flat `/data/` group, indexed by its unique Provenance Hash. A single computational event that produces multiple outputs (e.g., `U, S, V`) results in one Provenance Hash and one stored result set (e.g., a struct).
 * **Provenance Hash:** A unique fingerprint derived from three sources:
     1. The hash of the component function's M-file.
     2. The hash of a deterministically sorted list of the Provenance Hashes of all direct inputs.
     3. A hash of the specific subset of parameters defined in `.param_dependencies`.
 
-#### 3.4.1. The Caching Mechanism
+#### 3.4.1. The Caching Mechanism and Immutability
 
-To ensure high performance and parallel safety, the `StorageManager` implements a **dual-layer caching system**.
+To ensure high performance and parallel safety, the `StorageManager` implements a **dual-layer caching system** and enforces a **strict immutability contract** on the persistent store.
 
-1. **In-Memory Cache (L1):** A fast, temporary cache that exists for the duration of a single `pipeline.run()` execution. It is implemented using a `containers.Map`, where the key is the Provenance Hash and the value is the MATLAB data object.
+1. **In-Memory Cache (L1):** A fast, temporary cache that exists for the duration of a single `pipeline.run()` execution. It is implemented using a `containers.Map`, where the key is the Provenance Hash and the value is the MATLAB data object. This cache is overwrite-able to handle the immediate results from parallel workers.
 
-2. **Persistent Cache (L2):** The long-term, on-disk HDF5 file.
+2. **Persistent Cache (L2):** The long-term, on-disk HDF5 file. This cache is treated as a **Write-Once-Read-Many (WORM)** store, enforcing the principle of immutability.
 
-The `StorageManager` follows a strict logic for all `load` and `save` operations:
+The `StorageManager` follows a strict logic for all operations, which are called by the Orchestrator:
 
 * **On `load(hash)`:**
     1. The `StorageManager` first checks the **L1 in-memory cache**. If the hash exists, the object is returned instantly.
-    2. If not found in memory, it checks the **L2 persistent cache** (the HDF5 file).
+    2. If not found in memory, it checks the **L2 persistent cache**.
     3. If the data is found on disk, it is loaded, **promoted to the L1 cache** for future fast access, and then returned.
     4. If the data is not found anywhere, the load fails, signaling to the Executor that a computation is required.
 
-* **On `save(hash, data, policy)`:**
-    1. The new data is **always written to the L1 in-memory cache first**. This makes the result immediately available to any downstream dependents.
-    2. The `StorageManager` then evaluates the `storage_policy`. If the policy requires persistence, the data is queued for writing to the L2 cache. All writes to the HDF5 file are serialized by the main Executor thread to prevent race conditions.
+* **On `cache(hash, data)` (called by the Orchestrator for every new result):**
+    1. The new data is written to the **L1 in-memory cache**. This makes the result immediately available to any downstream dependents within the current run. If a key already exists (indicating a race condition from a non-pure function), it will be overwritten.
 
-#### 3.4.2 Garbage Collection
+* **On `persist(hash, data)` (called by the Orchestrator *after* evaluating a storage policy):**
+    1. The `StorageManager` first checks if the hash already exists in the **L2 persistent cache**.
+    2. If it exists, this signifies a critical architectural violation (e.g., a non-deterministic hash or a non-pure function). The `StorageManager` will **throw a fatal `StorageManager:OverwriteAttempt` error** and terminate the operation.
+    3. If it does not exist, the data is written to the HDF5 file.
 
-Because the storage strategy never overwrites data, a separate utility is required to manage storage space.
+#### 3.4.2. Garbage Collection
+
+Because the storage strategy is non-destructive, a separate utility is required to manage storage space.
 
 * **API:** `pipeline.gc(config)`
 * **Algorithm (Mark and Sweep):**
