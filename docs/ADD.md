@@ -1,6 +1,6 @@
 # Architecture Design Document: General-Purpose Scientific Pipeline Framework
 
-**Version:** 0.21.0
+**Version:** 0.21.1
 **Date:** 2025-07-22
 
 ---
@@ -17,72 +17,42 @@ Our architecture is guided by a core philosophy, translated into five technical 
 
 ---
 
-## 2. Framework-User Interaction Model
-
-This section describes how an end-user interacts with the framework once it is packaged as a MATLAB toolbox.
-
-### 2.1. Toolbox Packaging and API
-
-The framework will be distributed as a single, installable MATLAB toolbox file (`.mltbx`). This creates a read-only installation, ensuring a clean separation between the framework's internal code and the user's experiment code.
-
-The public API will be exposed through a MATLAB package (e.g., `+pipeline`). The primary user-facing entry point will be a single function:
-
-* `pipeline.run(config_object)`: Executes the entire pipeline as defined by the user-provided configuration object.
-
-### 2.2. User-Provided Code and Hashing
-
-The user provides their scientific logic as standard `.m` files. The framework is designed to find and hash these files without direct access.
-
-* **Function Handles:** The user's configuration file references these scientific functions using **function handles** (`@`).
-* **Path Discovery:** The framework's hashing mechanism will use `func2str()` to get the function name from the handle, and then `which()` to find the absolute file path. This allows it to read the file's content for hashing.
-* **Prerequisite:** This requires that the user's function files be on the MATLAB path or in the current directory at runtime, which is standard MATLAB behavior.
-
-### 2.3. Externalized Storage
-
-All persistent data is stored externally in the user's workspace, never inside the toolbox installation folder.
-
-* The path to the storage backend (e.g., the `.h5` file) is a **required field** in the user's configuration object (e.g., `config.storage.filepath`).
-* The framework's **Storage Manager** component reads this path from the configuration and uses it exclusively for all read/write operations.
-
-### 2.4. Integration with Version Control (Git)
-
-The framework is designed to work seamlessly with external version control systems like Git without requiring any direct integration. This "version awareness" is an emergent property of the Provenance Hashing mechanism.
-
-The **Code Hash** component of the Provenance Hash acts as the implicit version identifier for any computation. Because the hash is derived from the raw content of the `.m` file, any change to the code—no matter how small—results in a new hash.
-
-This enables a robust workflow for researchers using Git: when a user switches branches, the framework automatically detects the code state on disk and uses the correct cached data for that exact version of the code.
-
----
-
 ## 3. System Architecture
 
 The framework consists of several key internal components that work together.
 
-### 3.1. The Pipeline Executor (Stateful Task-Based Scheduler)
+### 3.1. The Orchestrator (Stateful Task-Based Scheduler)
 
-The Executor is a stateful, task-based scheduler. Its workflow is as follows:
+The **Orchestrator** is the central coordinating component of the framework. It operates as a stateful, task-based scheduler, and its workflow is as follows:
 
 1. **Initialization:** Loads the configuration object, validates its structure, and generates the list of parameter runs.
 2. **Graph Analysis:** Constructs a dependency graph from `config.stages` and performs a topological sort to create a valid execution plan and detect cycles.
-3. **Task Scheduling:** Operates as a state machine, managing a registry of all jobs and their statuses (`WAITING`, `READY`, `RUNNING`, `COMPLETE`, `FAILED`, `CANCELLED`). It continuously submits `READY` jobs to a parallel worker pool.
-4. **State Update and Error Handling:** When a worker completes a job, the Executor updates the state of all dependent jobs. If a job fails:
+3. **Task Scheduling:** Operates as a state machine, managing a registry of all jobs and their statuses (`WAITING`, `READY`, `RUNNING`, `COMPLETE`, `FAILED`, `CANCELLED`). It continuously submits `READY` jobs to the **Executor** component (which implements the `IExecutor` interface) for asynchronous execution.
+4. **State Update and Error Handling:** When a job completes, the **Orchestrator** updates the state of all dependent jobs. If a job fails:
     * It is marked as `FAILED`. The error is logged.
-    * If `config.error_mode` is `'fail_fast'`, the Executor terminates the entire pipeline.
-    * If `config.error_mode` is `'resilient'`, the Executor traverses the graph downstream from the failed job, marks all its dependents as `CANCELLED`, and continues executing other independent branches.
-5. **Reporting:** At the end of the run, the Executor provides a summary report of all job statuses.
+    * If `config.error_mode` is `'fail_fast'`, the **Orchestrator** terminates the entire pipeline.
+    * If `config.error_mode` is `'resilient'`, the **Orchestrator** traverses the graph downstream from the failed job, marks all its dependents as `CANCELLED`, and continues executing other independent branches.
+5. **Reporting:** At the end of the run, the **Orchestrator** provides a summary report of all job statuses.
 
 #### 3.1.1. Configuration Validation Routine
 
-The Executor's "Fail-Fast" validation is performed in three phases:
+Before any pipeline execution begins, the user's configuration undergoes a rigorous, multi-phase validation process. This is performed by dedicated validator components before the `Orchestrator` is created, ensuring the system fails fast on any invalid input. The validation is performed in three phases:
 
-1. **Schema and Structural Validation:** Checks the basic "grammar" of the configuration (e.g., required fields, data types, unique names).
-2. **Graph and Logical Validation:** Checks the "meaning" and integrity of the workflow, including:
-    * Verifying the dependency graph is a valid DAG via topological sort.
-    * Ensuring all dependency recipes and parameter links are valid (e.g., a `.where('rank', ...)` clause refers to an existing parameter).
-    * Confirming the parameter sweep will result in at least one run.
-3. **Environment Validation:** Checks for external prerequisites, such as:
+1. **Schema and Structural Validation:** This phase checks the basic "grammar" of the configuration file.
+    * Verifying all required fields are present.
+    * Checking that all values have the correct data type (e.g., stage names are strings, dependencies are in a struct).
+    * Ensuring stage names are unique.
+    * Confirming that function handles for stages point to existing, non-anonymous `.m` files.
+
+2. **Graph Construction and Logical Validation:** This phase checks the "meaning" and integrity of the defined workflow.
+    * The `DependencyGraph` object is constructed from the stage definitions.
+    * The graph's structure is verified to be a valid **Directed Acyclic Graph (DAG)** by attempting a topological sort.
+    * It ensures all dependency recipes refer to stages that exist in the graph.
+    * It confirms that the parameter sweep configuration will result in at least one run.
+
+3. **Environment Validation:** This final phase checks for external prerequisites required for the run.
     * The existence and licensing of required toolboxes (e.g., Parallel Computing Toolbox).
-    * Write permissions for the specified storage path.
+    * Write permissions for the specified storage path and log file path.
 
 ### 3.2. The Configuration
 
@@ -103,15 +73,17 @@ The `config.stages` array defines the computational graph. A stage in the `confi
 
 * `.name`: A unique string identifier.
 * `.function`: A function handle to the stateless component.
-* `.dependencies`: A struct mapping input names to **Dependency Recipes**.
-* `.param_dependencies`: A cell array of strings listing the parameters the stage depends on for granular hashing.
+* `.inputs`: A struct mapping input names to **Dependency Recipes**.
+* `.params`: A cell array of strings listing the parameters the stage depends on for granular hashing.
 * `.outputs`: A cell array of structs, where each struct defines an output's `.name` and `.storage_policy`.
-
-The `.storage_policy` field supports three options:
-
-* `'persistent'`: (Default) The output is always saved to the persistent HDF5 store.
-* `'memory_only'`: The output is only kept in memory for the duration of the pipeline run.
-* **Function Handle:** A handle to a boolean function (`@(p, all) ...`) for defining complex, conditional storage rules.
+* `.execution_mode` (string, optional): Controls the stage's execution scope. Defaults to `'per_run'`.
+  * `'per_run'`: The stage runs once for each parameter combination.
+  * `'global'`: The stage runs only once, acting as a barrier after its inputs from all runs are complete.
+  * **Note**: Any stage with no `.params` is automatically treated as a global setup stage.
+* The `.storage_policy` field for an output supports three options:
+  * `'persistent'`: (Default) The output is always saved to the persistent HDF5 store.
+  * `'memory_only'`: The output is only kept in memory for the duration of the pipeline run.
+  * **Function Handle**: A handle to a boolean function (`@(p) ...`) for defining complex, conditional storage rules based on the run's parameters.
 
 #### Logging and Error Configuration
 
@@ -120,56 +92,98 @@ The `config` struct also contains fields for controlling execution behavior:
 * **`config.logging`**: A struct containing logging settings (`.console_level`, `.file_level`, `.filepath`).
 * **`config.error_mode`**: A string, either `'resilient'` (default) or `'fail_fast'`.
 
-### 3.3. The Dependency Recipe and Resolver
+### 3.3. The Dependency Recipe and Resolution System
 
-Dependencies are defined programmatically using a fluent, object-oriented interface. This was chosen over URI strings or static structs for its superior readability, safety, and extensibility.
+Dependencies are defined programmatically using a fluent, object-oriented **Recipe**. A Recipe is a stateful **query builder** object that creates a detailed, declarative request for a specific data product.
 
-* **Role:** The **Resolver** is a component that translates a dependency recipe into a specific **Provenance Hash**.
-* **Syntax:** `resolver.get('source_stage').where(...).transform(...)`
-* **Functionality:** The recipe specifies what data to get, the policy for retrieving it (including cross-run and global lookups), and any in-line transformations (e.g., truncation) to apply before passing it to the consuming stage.
+The system is composed of two main parts: the `Recipe` object that defines the query, and the `Resolver` component that executes it.
+
+#### 3.3.1. The Recipe API
+
+A user creates a Recipe using the `pipeline.get()` factory method and then chains methods to refine the query. The framework will initially support the following fundamental methods:
+
+* **`get(stage_name, [output_names])`**: The starting point of every recipe. It specifies the source stage and which of its outputs are required.
+
+* **`filter(func_handle)`**: The primary method for filtering runs based on their parameters.
+  * **Signature**: `@(params) ...`
+  * **Functionality**: The provided handle receives a `ParameterView` object, which securely exposes only the parameters declared in the source stage's `.params`. The handle must return `true` if the run is a match. This validation is performed just-in-time by the `Resolver`.
+
+* **`all()`**: An operator that specifies the query should gather results from **all** runs that match the preceding filters, rather than a single run. This is the key to creating global, fan-in dependencies.
+
+* **`transform(func_handle)`**: Applies a final, in-line transformation to the data after it has been fully resolved and loaded.
+  * **Signature**: `@(data, source_params) ...`
+  * **Functionality**: This is for last-mile data preparation (e.g., truncating a matrix) before the data is passed to the consuming stage.
+
+#### 3.3.2. The Resolver's Role and Workflow
+
+The **Resolver** is the engine that executes a `Recipe` object. Its responsibility is to translate the recipe into a specific, actionable "work order" for the `Orchestrator`. It does this by recursively calculating the **Provenance Hash** of the requested data.
+
+The workflow is as follows:
+
+1. **Validation**: The `Resolver` receives a `Recipe`. Its first step is to validate any `.filter()` clauses against the source stage's declared `.params`. It will throw a fatal error if the filter attempts to access an undeclared parameter.
+
+2. **Query Execution**: It queries the cache index to find all runs that satisfy the validated filter conditions.
+
+3. **Ambiguity Check**: For any recipe that does not use `.all()`, the `Resolver` enforces that the query must resolve to **exactly one** result. If it matches zero or multiple results, it throws a fatal error.
+
+4. **Resolution**:
+    * **For simple recipes**: The `Resolver` recursively calculates the `ProvenanceHash` for the single matching result. It returns this hash and any `.transform()` function to the `Orchestrator`.
 
 ### 3.4. The Storage System
 
-The Storage System is composed of the `StorageManager` component and the HDF5 backend. It is designed around the principles of high performance, parallel safety, and uncompromising data integrity.
+The storage system is designed as a **two-tier architecture** to provide both high performance via in-memory caching and data integrity via persistent on-disk storage. The architecture strictly separates the caching logic from the persistence mechanism, allowing different storage backends to be used in the future without altering the core pipeline engine.
 
-* **Storage Manager:** A component responsible for the physical reading and writing of data. It has a simple, explicit API and manages the dual-layer cache. It does **not** evaluate high-level storage policies; it only executes direct commands from the Orchestrator.
-* **Provenance-Based Caching:** The HDF5 backend acts as a key-value store where data is stored in a flat `/data/` group, indexed by its unique Provenance Hash. A single computational event that produces multiple outputs (e.g., `U, S, V`) results in one Provenance Hash and one stored result set (e.g., a struct).
-* **Provenance Hash:** A unique fingerprint derived from three sources:
-    1. The hash of the component function's M-file.
-    2. The hash of a deterministically sorted list of the Provenance Hashes of all direct inputs.
-    3. A hash of the specific subset of parameters defined in `.param_dependencies`.
+#### 3.4.1. Architectural Overview
 
-#### 3.4.1. The Caching Mechanism and API
+1. **The `StorageManager` (L1 Cache Handler):** This component is the single point of contact for the `Executor`. It owns the fast, volatile in-memory cache (`containers.Map`) that exists for the duration of a single pipeline run. Its only job is to orchestrate data access, serving results from memory when possible and delegating to the `StorageBackend` when necessary.
 
-The `StorageManager` implements a **dual-layer caching system** and a strict API to ensure performance and parallel safety.
+2. **The `StorageBackend` (L2 Persistent Store):** This is an interface (an abstract class) that defines how to save, load, and delete data from a slow, durable, on-disk store. Concrete implementations (`HDF5Backend`, `SQLiteBackend`) handle the specifics of a given storage technology. The backend knows nothing about the L1 cache.
 
-1. **In-Memory Cache (L1):** A `containers.Map` that exists for the duration of a single `pipeline.run()` execution, holding all data for the current run.
-2. **Persistent Cache (L2):** The long-term, on-disk HDF5 file, treated as a **Write-Once-Read-Many (WORM)** store.
+The `Executor` communicates only with the `StorageManager`, which in turn commands the `StorageBackend`.
 
-The `StorageManager`'s public API for data manipulation is as follows:
+#### 3.4.2. The StorageManager API and Logic
 
-* **`load(hash)`:**
-    1. Checks the **L1 in-memory cache**. If the hash exists, the object is returned instantly.
-    2. If not found, it checks the **L2 persistent cache**.
-    3. If found in L2, it loads the data, **promotes it to the L1 cache** for future fast access, and then returns it.
-    4. If not found anywhere, the load fails, signaling to the Executor that a computation is required.
+The `StorageManager` is instantiated at the start of a run with a configured `StorageBackend`. Its API gives the `Executor` explicit control over the caching and persistence lifecycle.
 
-* **`cache(hash, data)`:**
-  * This method's only responsibility is to write the provided data object to the **L1 in-memory cache**. It is called by the `Orchestrator` for every newly computed result.
+* **`data = load(hash)`:** This is the primary data retrieval method.
+    1. It first checks the L1 in-memory cache. If the `hash` exists (**cache hit**), the data is returned instantly.
+    2. If the data is not in L1 (**cache miss**), the manager calls `load(hash)` on its `StorageBackend` to fetch the data from disk.
+    3. The retrieved data is then **promoted** into the L1 cache before being returned to the caller.
 
-* **`persist(hash)`:**
-  * This method's only responsibility is to promote data from the L1 cache to the L2 persistent store.
-  * It takes only a hash, retrieves the corresponding data from the L1 cache, and writes it to the HDF5 file.
-  * It enforces immutability: if the hash already exists in the L2 cache, this method will **throw a fatal `StorageManager:OverwriteAttempt` error**.
+* **`cache(hash, data)`:** This method writes a newly computed result **only** to the L1 in-memory cache. This action ensures the data is immediately available for subsequent stages within the same pipeline run, regardless of the persistence policy.
 
-#### 3.4.2. Garbage Collection
+* **`persist(hash)`:** This method promotes data from the L1 cache to the L2 persistent store. It takes only the `hash`, retrieves the corresponding data from the in-memory cache, and commands the `StorageBackend` to save it. This method is called by the `Executor` only when a `StoragePolicy` dictates that a result should be persisted.
 
-Because the storage strategy is non-destructive, a separate utility is required to manage storage space.
+#### 3.4.3. The StorageBackend Interface
+
+This defines a strict contract for any persistent storage technology to be compliant with the framework.
+
+* **Interface Definition:** A `StorageBackend` must implement the following methods:
+  * `save(key, data)`: Writes a data object to the persistent store, indexed by its key.
+  * `data = load(key)`: Retrieves a data object from the persistent store.
+  * `flag = exists(key)`: Returns `true` if the key exists in the persistent store.
+  * `delete(key)`: Removes a key and its associated data from the persistent store.
+
+#### 3.4.4. Provenance-Based Indexing
+
+The key for all storage operations, in both L1 and L2 caches, is the **Provenance Hash**. This hash is the unique fingerprint of a computational event and is derived from three and only three sources:
+
+1. The hash of the component function's M-file. The framework hashes scientific functions by locating their `.m` files via the function handle and `which()`, requiring all user functions to be on the MATLAB path.
+2. The hash of a deterministically sorted list of the Provenance Hashes of all direct inputs.
+3. A hash of the specific subset of parameters the stage depends on.
+
+This consistent hashing formula is the foundation of the framework's reproducibility and caching capabilities.
+
+#### 3.4.5. Garbage Collection
+
+The garbage collection utility operates directly on the `StorageBackend`.
 
 * **API:** `pipeline.gc(config)`
 * **Algorithm (Mark and Sweep):**
-  * **Mark:** The utility first identifies the complete set of all "live" Provenance Hashes that are reachable from the *current* `pipeline_config.m`.
-  * **Sweep:** It then scans the storage backend. Any data whose hash is not in the "live" set is considered orphaned and is deleted, reclaiming storage space.
+  * **Mark:** The utility first calculates the complete set of all "live" Provenance Hashes that are reachable from the provided pipeline configuration.
+  * **Sweep:** It then iterates through all keys in the `StorageBackend`. For any key that is not in the "live" set, it calls the `backend.delete(key)` method to reclaim storage space.
+
+---
 
 ### 3.5. Stateless Components
 
