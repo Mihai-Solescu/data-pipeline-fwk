@@ -67,19 +67,19 @@ To create a modular, reusable, and efficient MATLAB framework for executing comp
 * **FR-5**: The system shall support singleton (setup), per-run, and global (barrier) stage execution modes.
 * **FR-6**: The system shall allow users to define conditional storage policies for stage outputs.
 * **FR-7**: The system shall support advanced, user-defined data retrieval and transformation policies to enable intelligent, cross-run data sharing.
-* **FR-8**: The system shall automatically detect any change to a component function's source code.
+* **FR-8**: The system shall automatically detect any change to a component function's source code by comparing cryptographic hashes (e.g., SHA-256).
 * **FR-9**: The system shall provide a utility to perform garbage collection, deleting any cached data that is not reachable from a given pipeline configuration, in order to reclaim storage space.
 * **FR-10**: The system shall provide a logging mechanism that can output to both the MATLAB Command Window and an optional log file, as specified in the configuration.
 * **FR-11**: The system shall support at least three named verbosity levels (`'info'`, `'debug'`, `'silent'`) for logging, with separate controls for console and file outputs.
 * **FR-12**: The system shall support two user-configurable error handling modes: `'resilient'` (continue executing independent jobs upon failure) and `'fail_fast'` (terminate immediately upon any failure).
 * **FR-13**: In resilient mode, the system shall log all errors from failed jobs and provide a final summary report of all job statuses (`SUCCEEDED`, `CACHED`, `FAILED`, `CANCELLED`).
-* **FR-14**: The system shall perform a comprehensive validation of the user-provided configuration at startup. If any validation check fails, the pipeline must terminate immediately with a clear and informative error message.
+* **FR-14**: The system shall perform a comprehensive validation of the user-provided configuration at startup. If any validation check fails, the pipeline must terminate immediately with a clear and informative error message. Validation must include, at a minimum verification that the dependency graph is a DAG (no circular dependencies), and ensuring all stage dependencies refer to existing, defined stages.
 
 ---
 
 ## 5. Non-Functional Requirements (NFR)
 
-* **NFR-1 (Performance)**: The overhead of the pipeline executor shall be negligible compared to the total time of the computational tasks.
+* **NFR-1 (Performance)**: The framework overhead for executing a stage with no computational work shall be less than 300 milliseconds.
 * **NFR-2 (Usability)**: Adding a new stage shall only require creating a component function and adding its definition to the configuration.
 * **NFR-3 (Reliability)**: The pipeline shall be resumable; an interrupted run can be continued without re-computing completed stages.
 * **NFR-4 (Maintainability)**: The framework's code shall be modular with a strict separation of concerns.
@@ -93,3 +93,4 @@ To create a modular, reusable, and efficient MATLAB framework for executing comp
 * **Scenario 3: Resuming After Code Change:** After a user modifies the code for a single stage in a multi-stage pipeline, re-running the pipeline shall automatically re-execute only the modified stage and any downstream stages that depend on it.
 * **Scenario 4: Singleton Data Source:** The framework shall be able to generate a single, master dataset once at the beginning of a workflow, which is then used as a source for multiple per-run stages that select or subset it based on their parameters.
 * **Scenario 5: Global dependency in local stage** A scientist is analyzing the error from multiple model runs. For each individual run, they want to compute a normalized error score, which is the run's raw error divided by the global maximum error found across all runs in the experiment.
+* **Scenario 6: Ingesting an External Data File:** A user has a pre-existing dataset stored in an external file (e.g., a `.csv` or `.mat` file). The first stage of the pipeline must read this file to begin the workflow. The path to this external file shall be configurable as a parameter for the run.
