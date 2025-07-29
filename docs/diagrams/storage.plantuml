@@ -1,0 +1,54 @@
+@startuml storage
+' Style and layout settings
+skinparam classAttributeIconSize 0
+skinparam linetype ortho
+hide empty members
+
+' Package for the Storage System
+package "Storage System (+internal)" {
+
+  class StorageManager {
+    - L1_Cache : containers.Map
+    - L2_Backend : StorageBackend
+    + StorageManager(backend : StorageBackend)
+    + cache(key, data) : void
+    + persist(key) : void
+    + load(key) : data
+  }
+
+  interface StorageBackend <<interface>> {
+    {abstract} + save(key, data) : void
+    {abstract} + load(key) : data
+    {abstract} + exists(key) : boolean
+    {abstract} + delete(key) : void
+  }
+
+  class HDF5Backend {
+    - filepath : string
+    + save(key, data) : void
+    + load(key) : data
+    + exists(key) : boolean
+    + delete(key) : void
+  }
+}
+
+' Package for the Storage Policy System
+package "Policy System (+policy)" {
+
+  enum StorageDecision <<enumeration>> {
+    PERSIST
+    CACHE_ONLY
+  }
+
+  class StoragePolicy {
+    + decide(context) : StorageDecision
+  }
+}
+
+' Relationships between components
+StorageManager *-- "1" StorageBackend : uses
+HDF5Backend ..|> StorageBackend : implements
+
+StoragePolicy ..> StorageDecision : returns
+
+@enduml
