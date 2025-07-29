@@ -1,38 +1,29 @@
-# ADR-023: Adoption of the Built-in MATLAB Logging Framework
+# ADR-023: Adoption of mathworks/advanced-logger
 
 **Status:** Accepted
-**Date:** 2025-07-23
+**Date:** 2025-07-29
 
 ## Context
 
-The framework requires a robust and configurable logging system to provide users with feedback and to aid in debugging. We considered two primary approaches: implementing a custom `Logger` class from scratch or adopting the built-in logging framework provided by MATLAB (`matlab.log`). The chosen solution must be powerful, maintainable, and align with our core principle of providing a MATLAB-native experience.
+The framework requires a robust and configurable logging system to provide users with feedback and to aid in debugging. We considered three primary approaches: a custom `Logger` class, the built-in `matlab.log` framework, and the `mathworks/advanced-logger` available on File Exchange. The chosen solution must be powerful, maintainable, and align with our core principle of providing a MATLAB-native experience.
 
 ## Decision
 
-We will exclusively use the built-in **`matlab.log` framework** for all logging.
+We will exclusively use the **`mathworks/advanced-logger`** framework for all logging.
 
 The implementation will follow a dependency injection pattern:
 
-1. The `Orchestrator` will be responsible for creating and configuring a single, shared logger instance at the beginning of a pipeline run, based on the user's `config.logging` settings.
+1. The `Orchestrator` will be responsible for creating and configuring a single, shared logger instance at the beginning of a pipeline run, based on the user's `config.logging` settings. This is simplified by the higher-level API of `advanced-logger`.
 2. This configured logger instance will be passed to the constructors of all other internal components (e.g., `StorageManager`, `Resolver`) that require logging capabilities.
-3. We will adhere to the standard, hierarchical verbosity levels provided by the framework (e.g., `INFO`, `DEBUG`, `WARN`). We will not implement a more complex, per-message filtering system, as the standard levels provide the best balance of control and simplicity.
+3. We will adhere to the standard, hierarchical verbosity levels provided by the framework (e.g., `INFO`, `DEBUG`, `WARN`).
 
-## Alternatives Considered
+## Rationale for Choosing `mathworks/advanced-logger`
 
-### Custom `Logger` Class
+Adopting `mathworks/advanced-logger` is the superior architectural choice for several compelling reasons:
 
-We designed a simple, custom `Logger` class that would handle `fprintf` calls to the console and a log file based on custom verbosity levels.
+* **Adherence to the "MATLAB-Native" Philosophy ✅:** While not built-in, this framework is developed and maintained by MathWorks. Adopting it means we are using the officially-endorsed, best-practice solution for advanced logging needs, ensuring a professional and integrated feel.
+* **Superior Developer Experience & Simplicity 🔗:** The `advanced-logger` provides a cleaner, higher-level API that simplifies common logging patterns. Setting up complex configurations (like dual file/console output) is often a single, clear command, reducing boilerplate code in our `Orchestrator`.
+* **Reduced Maintenance Burden:** By leveraging a mature, well-tested system from MathWorks that is built on top of the core `matlab.log` engine, we get the best of both worlds: a convenient API and a stable foundation, all while reducing the amount of custom configuration code we need to maintain.
+* **Standardization and Clarity:** The framework uses the same standard log levels (`INFO`, `DEBUG`, `WARN`) as the built-in system, making the framework's output immediately understandable to other developers.
 
-* **Pros:** Simple initial implementation, complete control over the API.
-* **Cons:** This approach reinvents a solved problem. It is less extensible, requires more custom code to maintain, and lacks the powerful features (like the `Appender` model) of the built-in solution.
-
-## Rationale for Choosing the Built-in Framework
-
-Adopting the `matlab.log` framework is the superior architectural choice for several compelling reasons:
-
-* **Adherence to the "MATLAB-Native" Philosophy ✅:** Using the official, idiomatic tool provided by MathWorks is the quintessential MATLAB-native approach. It ensures the framework feels professional and integrates seamlessly with the broader MATLAB ecosystem.
-* **Superior Extensibility and Separation of Concerns 🔗:** The built-in framework's **`Appender` model** is a more elegant and powerful design. The logger is responsible for creating log records, while separate `Appender` objects are responsible for the destination (console, file, etc.). This makes it trivial to add new logging destinations in the future without changing any core framework code.
-* **Reduced Maintenance Burden:** By leveraging a mature, well-tested system from MathWorks, we reduce the amount of custom code we need to write, test, and maintain.
-* **Standardization and Clarity:** The use of standard, hierarchical log levels (`INFO`, `DEBUG`, `WARN`) is an industry best practice. It makes the framework's output immediately understandable to other developers and provides a clear, simple model for users to control verbosity.
-
-This decision ensures our logging system is robust, maintainable, and aligned with the high standards of the overall framework architecture.
+This decision ensures our logging system is robust and maintainable, and that it utilizes the most modern and officially recommended tooling from MathWorks.
