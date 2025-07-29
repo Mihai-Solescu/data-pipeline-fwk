@@ -57,41 +57,13 @@ This document provides a detailed, atomic, and test-driven implementation plan. 
 
 **Goal:** Implement a robust, testable component for all data I/O and state management.
 
-- [x] **Task 2.1: Implement the `StorageManager`**
-  - **Key Concepts:**
-    - [MATLAB `containers.Map`](https://www.mathworks.com/help/matlab/ref/containers.map.html)
-    - [MATLAB High-Level HDF5 Functions](https://www.mathworks.com/help/matlab/hdf5-files.html)
-    - [Test-Driven Development in MATLAB](https://www.mathworks.com/help/matlab/matlab_prog/write-class-based-unit-tests-in-matlab.html)
-
-  - [x] **Sub-Task 2.1.1: Test L2 (Persistent) Cache**
-    - **TDD:** In `tests/test_StorageManager.m`, write tests that:
-            1. Instantiate the `StorageManager` with a temporary HDF5 file path.
-            2. Call `.save()` with a hash and some data with a `'persistent'` policy.
-            3. Verify that the data exists in the HDF5 file in the correct location (`/data/<hash>`).
-            4. Instantiate a *new* `StorageManager` and call `.load()` with the same hash.
-            5. Assert that the loaded data is identical to the original.
-
-  - [x] **Sub-Task 2.1.2: Implement L2 (Persistent) Cache Logic**
-    - **Action:** In `+pipeline/+internal/StorageManager.m`, implement the constructor and the parts of the `save`/`load` methods that interact with the HDF5 file.
-
-  - [x] **Sub-Task 2.1.3: Test L1 (In-Memory) Cache**
-    - **TDD:** In `tests/test_StorageManager.m`, write tests that:
-            1. Verify that a `save` operation with a `'memory_only'` policy writes to the L1 cache but *not* the HDF5 file.
-            2. Verify that after loading data from L2, a subsequent `load` for the same hash is served from L1 (this can be tested using mock objects or by measuring performance, though the former is better).
-
-  - [x] **Sub-Task 2.1.4: Implement L1 (In-Memory) Cache Logic**
-    - **Action:** Add the `containers.Map` property to the `StorageManager` class and integrate the L1 caching logic into the `save`/`load` methods.
-
-  - [x] **Sub-Task 2.1.5: Test File Locking**
-    - **TDD:** Write a test that attempts to instantiate two `StorageManager` objects pointing to the same file path simultaneously. Assert that the second instantiation throws a specific error.
-    - **Action:** Implement the `.lock` file mechanism in the `StorageManager` constructor and destructor/cleanup methods.
-
-  - [ ] **Sub-Task 2.1.4: Implement Full Error Handling and Logging**
-    - **TDD:** Write specific tests to verify that all defined errors (`FileLocked`, `OverwriteAttempt`, `DataNotFound`, etc.) are thrown under the correct conditions.
-    - **Action:** Implement the error-throwing logic and integrate logging calls for all key events (`L1CacheHit`, `DataPersistedToL2`, etc.).
-
-  - [ ] **Sub-Task 2.1.5: Document `StorageManager` Outputs**
-    - **Action:** Add the complete taxonomy of all `StorageManager` errors and logs to `CONTRIBUTING.md`.
+- [ ] **Task 2.1: Implement the Storage Subsystem (excluding garbage utility)**
+  - The implementation details and step-by-step instructions are maintained in:
+    - [ADD Section 3.4: Storage System](ADD.md#34-the-storage-system)
+    - [docs/instructions/storage.md](instructions/storage.md)
+  - This includes all aspects of caching, persistence, file locking, provenance-based indexing, error handling, and logging, following strict test-driven development.
+  - The garbage collection utility (`pipeline.gc`) will be implemented in Phase 7.
+  - All low-level implementation and test steps are tracked in the above documents.
 
 ---
 
