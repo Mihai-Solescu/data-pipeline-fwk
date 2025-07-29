@@ -11,6 +11,15 @@ The storage subsystem consists of:
 - `HDF5Backend`: Implements `StorageBackend` for HDF5 files.
 - Storage policies and error handling.
 
+**File Organization:**
+All storage component files should be placed under the `+pipeline/+storage/` directory for modularity and clarity:
+
+- `+pipeline/+storage/StorageManager.m`
+- `+pipeline/+storage/StorageBackend.m`
+- `+pipeline/+storage/HDF5Backend.m`
+
+This keeps the storage subsystem organized as its own package within the framework.
+
 ## 2. Implementation Steps
 
 ### 2.1. StorageBackend Interface
@@ -68,6 +77,7 @@ The storage subsystem consists of:
 
 - Define and document all error types (e.g., `FileLocked`, `OverwriteAttempt`, `DataNotFound`).
 - Integrate logging for all key events (cache hits, persistence, errors).
+- Use the `advanced-logger` package (see `vendor/advanced-logger`) as the single logger for this project. Do not use a mock logger; all logging should go through advanced-logger.
 - Write tests to trigger and verify each error and log output.
 
 ### 2.8. Garbage Collection (DO NOT IMPLEMENT THIS NOW)
@@ -98,7 +108,9 @@ The storage subsystem consists of:
 
 - See ADD Section 3.4 for architecture and API details.
 - See ROADMAP Phase 2 for implementation and testing tasks.
+
 - Refer to the PlantUML diagram in `docs/diagrams/storage.puml` for component relationships.
+- Storage component source files are located in `+pipeline/+storage/`.
 
 ---
 
