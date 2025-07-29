@@ -133,6 +133,14 @@ The workflow is as follows:
 
 The storage system is designed as a **two-tier architecture** to provide both high performance via in-memory caching and data integrity via persistent on-disk storage. The architecture strictly separates the caching logic from the persistence mechanism, allowing different storage backends to be used in the future without altering the core pipeline engine.
 
+#### Storage System Diagram
+
+The following diagram illustrates the main components and relationships in the storage subsystem:
+
+```plantuml
+!include diagrams/storage.plantuml
+```
+
 #### 3.4.1. Architectural Overview
 
 1. **The `StorageManager` (L1 Cache Handler):** This component is the single point of contact for the `Executor`. It owns the fast, volatile in-memory cache (`containers.Map`) that exists for the duration of a single pipeline run. Its only job is to orchestrate data access, serving results from memory when possible and delegating to the `StorageBackend` when necessary.
