@@ -15,20 +15,20 @@ function config = generate_config()
     
     % Parameter Grid for Comprehensive Sweep
     % Time series lengths to test (in time units)
-    config.param_grid.timeseries_lengths = [30, 50, 65, 75, 100];
+    config.param_grid.timeseries_lengths = [30, 50];
     
     % Index delay parameters for time-delay embedding
-    config.param_grid.index_delays = int32([1, 5, 10, 15, 20]);
+    config.param_grid.index_delays = int32([1, 5]);
     
     % Variable combinations to test from Lorenz system [x, y, z]
     % Options: 'x', 'y', 'z', 'xy', 'xz', 'yz', 'xyz'
     config.param_grid.variable_combinations = {'x', 'xz'};
 
     % Embedding dimension multiples (number of time-delayed copies to stack)
-    config.param_grid.embedding_dim_multiples = int32([30, 65, 100, 150]);
+    config.param_grid.embedding_dim_multiples = int32([30, 50]);
     
     % Truncation ranks for SVD (number of modes to retain)
-    config.param_grid.truncation_ranks = int32([10, 15, 20, 25, 30]);
+    config.param_grid.truncation_ranks = int32([10, 15]);
     
     % Maximum polynomial degrees for extended Hankel matrices
     config.param_grid.max_degrees = int32([2, 3]);
@@ -49,5 +49,24 @@ function config = generate_config()
     config.variable_map = containers.Map(...
         {'x', 'y', 'z', 'xy', 'xz', 'yz', 'xyz'}, ...
         {[1], [2], [3], [1,2], [1,3], [2,3], [1,2,3]});
-     
+    
+    %% Stages Configuration
+    config.stages = struct();
+
+    config.stages(1).name = 'compute_master_timeseries';
+    config.stages(1).params = {'master_timeseries_length', 'dt'};
+    config.stages(1).inputs = {};
+    config.stages(1).outputs = {'master_timeseries', 'time_vector'};
+    config.stages(1).function = @compute_master_timeseries;
+    config.stages(1).storage_policy = 'memory';
+    config.stages(1).execution_mode = 'global'; % Having no inputs, this would be inferred anyway
+
+    config.stages(2).name = 'compute_hankel_havok';
+    config.stages(2).params = {'hankel_type', 'max_degrees', 'max_harmonics'};
+    config.stages(2).inputs = {'master_timeseries', 'time_vector'};
+    config.stages(2).outputs = {'hankel_matrix', 'havok_model'};
+    config.stages(2).function = @compute_hankel_havok;
+    config.stages(2).storage_policy = 'memory';
+    config.stages(2).execution_mode = 'global'; % Having no dependencies, this would be inferred anyway
+
 end
