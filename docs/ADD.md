@@ -1,6 +1,6 @@
 # Architecture Design Document: General-Purpose Scientific Pipeline Framework
 
-**Version:** 0.25.1
+**Version:** 0.26.1
 **Date:** 2025-07-31
 
 ---
@@ -32,6 +32,8 @@ The `config.stages` struct defines the computational graph. Each **field** in th
   * `'persistent'`: (Default) The output is always saved to the persistent HDF5 store.
   * `'memory_only'`: The output is only kept in memory for the duration of the pipeline run.
   * **Function Handle**: A function handle with the signature `f(p, G)` for defining conditional storage rules. `p` is the current run's parameter struct, and `G` is the global grid metadata struct. If the function returns `true`, the output is persisted; if `false`, it is memory-only for that run.
+
+> **Note:** The implementation of advanced features—specifically the **conditional storage policy** and the full input resolver API—will be deferred to a later development stage. These features are modular, non-breaking extensions to the core architecture. The initial release will focus on stabilizing the fundamental caching and dependency-tracking logic, which uses provenance hashing and simple string-based dependency recipes. For details on the planned resolver system, see [The Dependency Recipe and Resolution System](#5-the-dependency-recipe-and-resolution-system).
 
 ### Output Storage Location
 
@@ -75,8 +77,6 @@ This function is used to selectively discard runs from the generated parameter g
   * `G`: The complete **global grid** struct (`config.params.grid`), passed by value. This allows for powerful relative logic by giving the function access to the full range of all tested parameter values (e.g., `max(G.rank)`).
 * **Return Value:** Must return `true` to keep the run or `false` to discard it.
 
----
-
 ### Conditional Storage Policy Function
 
 This function is used to define complex rules for whether a stage's output should be saved to the persistent HDF5 store. Its signature is identical to the parameter filter's, providing full context for the decision.
@@ -89,7 +89,7 @@ This function is used to define complex rules for whether a stage's output shoul
 
 ---
 
-## 2 Hashing (ADR-012)
+## 3. Hashing (ADR-012)
 
 The framework's guarantee of reproducibility and computational efficiency is built upon a **Provenance-Based Hashing** system. Instead of hashing the *output* of a computation, the framework generates a unique and deterministic fingerprint for the computation's complete origin, or **provenance**. This allows the expected hash to be calculated *before* a stage is executed, enabling efficient cache lookups.
 
@@ -111,6 +111,8 @@ The construction of the **Granular Parameter Hash** is governed by a strict cont
 
 * **Inherited Parameters are Not Included**: The `Parameter Hash` is derived **only** from the parameters explicitly listed in the stage's own `.params` field. The influence of all upstream (or "inherited") parameters is already perfectly captured by the **Input Hashes**. This elegant separation ensures that the provenance is recorded without redundancy.
 
+If a parameter is declared in `.params` but is not found in the function's code, the framework should proceed with the computation but print a clear warning to the console (e.g. `WARNING in stage 'compute_svd': Parameter 'dt' is declared in '.params' but does not appear to be used in the function 'compute_svd.m'. Including it may cause unnecessary recomputations if its value changes.`).
+
 ### Cascading Invalidation and Efficiency
 
 This hashing design creates a "keychain" of cryptographic dependency.
@@ -121,6 +123,60 @@ A change to any upstream component automatically propagates downstream. For exam
 2. Any stage that depends on the *output* of such a stage will see its `Input Hashes` change and will also be re-run, even if it doesn't use `dt` directly.
 
 This mechanism ensures that the absolute minimum number of computations is performed. A stage is only re-run if its code, its direct parameters, or its direct inputs have changed, guaranteeing both maximum efficiency and uncompromising reproducibility.
+
+## 4. The Storage System
+
+The storage system is designed as a **two-tier architecture** to provide both high performance via in-memory caching and data integrity via persistent on-disk storage. The architecture strictly separates the caching logic from the persistence mechanism, allowing different storage backends to be used in the future without altering the core pipeline engine.
+
+### Storage System Diagram
+
+The following diagram illustrates the main components and relationships in the storage subsystem:
+
+```plantuml
+!include diagrams/storage.plantuml
+```
+
+### Architectural Overview
+
+1. **The `StorageManager` (L1 Cache Handler):** This component is the single point of contact for the `Executor`. It owns the fast, volatile in-memory cache (`containers.Map`) that exists for the duration of a single pipeline run. Its only job is to orchestrate data access, serving results from memory when possible and delegating to the `StorageBackend` when necessary.
+
+2. **The `StorageBackend` (L2 Persistent Store):** This is an interface (an abstract class) that defines how to save, load, and delete data from a slow, durable, on-disk store. Concrete implementations (`HDF5Backend`, `SQLiteBackend`) handle the specifics of a given storage technology. The backend knows nothing about the L1 cache.
+
+The `Executor` communicates only with the `StorageManager`, which in turn commands the `StorageBackend`.
+
+### The StorageManager API and Logic
+
+The `StorageManager` is instantiated at the start of a run with a configured `StorageBackend`. Its API gives the `Executor` explicit control over the caching and persistence lifecycle.
+
+* **`data = load(hash)`:** This is the primary data retrieval method.
+    1. It first checks the L1 in-memory cache. If the `hash` exists (**cache hit**), the data is returned instantly.
+    2. If the data is not in L1 (**cache miss**), the manager calls `load(hash)` on its `StorageBackend` to fetch the data from disk.
+    3. The retrieved data is then **promoted** into the L1 cache before being returned to the caller.
+
+* **`cache(hash, data)`:** This method writes a newly computed result **only** to the L1 in-memory cache. This action ensures the data is immediately available for subsequent stages within the same pipeline run, regardless of the persistence policy.
+
+* **`persist(hash)`:** This method promotes data from the L1 cache to the L2 persistent store. It takes only the `hash`, retrieves the corresponding data from the in-memory cache, and commands the `StorageBackend` to save it. This method is called by the `Executor` only when a `StoragePolicy` dictates that a result should be persisted.
+
+### The StorageBackend Interface
+
+This defines a strict contract for any persistent storage technology to be compliant with the framework.
+
+* **Interface Definition:** A `StorageBackend` must implement the following methods:
+  * `save(key, data)`: Writes a data object to the persistent store, indexed by its key.
+  * `data = load(key)`: Retrieves a data object from the persistent store.
+  * `flag = exists(key)`: Returns `true` if the key exists in the persistent store.
+  * `delete(key)`: Removes a key and its associated data from the persistent store.
+
+### Garbage Collection
+
+The garbage collection utility operates directly on the `StorageBackend`.
+
+* **API:** `pipeline.gc(config)`
+* **Algorithm (Mark and Sweep):**
+  * **Mark:** The utility first calculates the complete set of all "live" Provenance Hashes that are reachable from the provided pipeline configuration.
+  * **Sweep:** It then iterates through all keys in the `StorageBackend`. For any key that is not in the "live" set, it calls the `backend.delete(key)` method to reclaim storage space.
+
+---
 
 ### 2.2. The Orchestrator (Stateful Task-Based Scheduler)
 
@@ -155,13 +211,15 @@ Before any pipeline execution begins, the user's configuration undergoes a rigor
     * The existence and licensing of required toolboxes (e.g., Parallel Computing Toolbox).
     * Write permissions for the specified storage path and log file path.
 
-### 2.3. The Dependency Recipe and Resolution System
+---
+
+## 5. The Dependency Recipe and Resolution System
 
 Dependencies are defined programmatically using a fluent, object-oriented **Recipe**. A Recipe is a stateful **query builder** object that creates a detailed, declarative request for a specific data product.
 
 The system is composed of two main parts: the `Recipe` object that defines the query, and the `Resolver` component that executes it.
 
-#### 2.3.1. The Recipe API
+### The Recipe API
 
 A user creates a Recipe using the `pipeline.get()` factory method and then chains methods to refine the query. The framework will initially support the following fundamental methods:
 
@@ -177,7 +235,7 @@ A user creates a Recipe using the `pipeline.get()` factory method and then chain
   * **Signature**: `@(inputs, source_params) ...`
   * **Functionality**: This is for last-mile data preparation (e.g., truncating a matrix) before the data is passed to the consuming stage.
 
-#### 2.3.2. The Resolver's Role and Workflow
+### The Resolver's Role and Workflow
 
 The **Resolver** is the engine that executes a `Recipe` object. Its responsibility is to translate the recipe into a specific, actionable "work order" for the `Orchestrator`. It does this by recursively calculating the **Provenance Hash** of the requested data.
 
@@ -191,68 +249,6 @@ The workflow is as follows:
 
 4. **Resolution**:
     * **For simple recipes**: The `Resolver` recursively calculates the `ProvenanceHash` for the single matching result. It returns this hash and any `.transform()` function to the `Orchestrator`.
-
-### 2.4. The Storage System
-
-The storage system is designed as a **two-tier architecture** to provide both high performance via in-memory caching and data integrity via persistent on-disk storage. The architecture strictly separates the caching logic from the persistence mechanism, allowing different storage backends to be used in the future without altering the core pipeline engine.
-
-#### Storage System Diagram
-
-The following diagram illustrates the main components and relationships in the storage subsystem:
-
-```plantuml
-!include diagrams/storage.plantuml
-```
-
-#### 2.4.1. Architectural Overview
-
-1. **The `StorageManager` (L1 Cache Handler):** This component is the single point of contact for the `Executor`. It owns the fast, volatile in-memory cache (`containers.Map`) that exists for the duration of a single pipeline run. Its only job is to orchestrate data access, serving results from memory when possible and delegating to the `StorageBackend` when necessary.
-
-2. **The `StorageBackend` (L2 Persistent Store):** This is an interface (an abstract class) that defines how to save, load, and delete data from a slow, durable, on-disk store. Concrete implementations (`HDF5Backend`, `SQLiteBackend`) handle the specifics of a given storage technology. The backend knows nothing about the L1 cache.
-
-The `Executor` communicates only with the `StorageManager`, which in turn commands the `StorageBackend`.
-
-#### 2.4.2. The StorageManager API and Logic
-
-The `StorageManager` is instantiated at the start of a run with a configured `StorageBackend`. Its API gives the `Executor` explicit control over the caching and persistence lifecycle.
-
-* **`data = load(hash)`:** This is the primary data retrieval method.
-    1. It first checks the L1 in-memory cache. If the `hash` exists (**cache hit**), the data is returned instantly.
-    2. If the data is not in L1 (**cache miss**), the manager calls `load(hash)` on its `StorageBackend` to fetch the data from disk.
-    3. The retrieved data is then **promoted** into the L1 cache before being returned to the caller.
-
-* **`cache(hash, data)`:** This method writes a newly computed result **only** to the L1 in-memory cache. This action ensures the data is immediately available for subsequent stages within the same pipeline run, regardless of the persistence policy.
-
-* **`persist(hash)`:** This method promotes data from the L1 cache to the L2 persistent store. It takes only the `hash`, retrieves the corresponding data from the in-memory cache, and commands the `StorageBackend` to save it. This method is called by the `Executor` only when a `StoragePolicy` dictates that a result should be persisted.
-
-#### 2.4.3. The StorageBackend Interface
-
-This defines a strict contract for any persistent storage technology to be compliant with the framework.
-
-* **Interface Definition:** A `StorageBackend` must implement the following methods:
-  * `save(key, data)`: Writes a data object to the persistent store, indexed by its key.
-  * `data = load(key)`: Retrieves a data object from the persistent store.
-  * `flag = exists(key)`: Returns `true` if the key exists in the persistent store.
-  * `delete(key)`: Removes a key and its associated data from the persistent store.
-
-#### 2.4.5. Garbage Collection
-
-The garbage collection utility operates directly on the `StorageBackend`.
-
-* **API:** `pipeline.gc(config)`
-* **Algorithm (Mark and Sweep):**
-  * **Mark:** The utility first calculates the complete set of all "live" Provenance Hashes that are reachable from the provided pipeline configuration.
-  * **Sweep:** It then iterates through all keys in the `StorageBackend`. For any key that is not in the "live" set, it calls the `backend.delete(key)` method to reclaim storage space.
-
----
-
-### 2.5. Stateless Components
-
-User-provided scientific code must be written as stateless functions.
-
-* They accept a single struct of inputs.
-* They return a single struct of outputs.
-* They must not perform any file I/O or access global state, ensuring they are pure and reproducible.
 
 ---
 
