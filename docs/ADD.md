@@ -111,7 +111,7 @@ A user creates a Recipe using the `pipeline.get()` factory method and then chain
 * **`all()`**: An operator that specifies the query should gather results from **all** runs that match the preceding filters, rather than a single run. This is the key to creating global, fan-in dependencies.
 
 * **`transform(func_handle)`**: Applies a final, in-line transformation to the data after it has been fully resolved and loaded.
-  * **Signature**: `@(data, source_params) ...`
+  * **Signature**: `@(inputs, source_params) ...`
   * **Functionality**: This is for last-mile data preparation (e.g., truncating a matrix) before the data is passed to the consuming stage.
 
 #### 3.3.2. The Resolver's Role and Workflow

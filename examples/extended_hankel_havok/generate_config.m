@@ -36,12 +36,6 @@ function config = generate_config()
         'block_vertical'...     % Block vertical extension
     };
     
-    %% Variable Mapping (doesn't belong here, will move it to the correct place later)
-    % Mapping from variable combination strings to column indices
-    config.variable_map = containers.Map(...
-        {'x', 'y', 'z', 'xy', 'xz', 'yz', 'xyz'}, ...
-        {[1], [2], [3], [1,2], [1,3], [2,3], [1,2,3]});
-    
     %% Stages Configuration
     config.stages = struct();
 
