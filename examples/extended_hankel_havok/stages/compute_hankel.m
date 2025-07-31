@@ -1,7 +1,13 @@
 function out = compute_hankel(in, p)
 
+    % Mapping from variable combination strings to column indices
+    variable_map = containers.Map(...
+        {'x', 'y', 'z', 'xy', 'xz', 'yz', 'xyz'}, ...
+        {[1], [2], [3], [1,2], [1,3], [2,3], [1,2,3]});
+
     xdat_filtered = in.master_timeseries(1:p.timeseries_length);
-    t_filtered = in.time_vector(1:p.timeseries_length);
+    xdat_filtered = xdat_filtered(variable_map(p.variable_combination));
+    % t_filtered = in.time_vector(1:p.timeseries_length); % unused
 
     switch p.hankel_type
         case 'normal'
