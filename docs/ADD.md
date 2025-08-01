@@ -55,7 +55,7 @@ The `config.stages` struct defines the computational graph. Each **field** in th
 The `config` struct also contains fields for controlling execution behavior:
 
 * **`config.logging`**: A struct containing logging settings (`.console_level`, `.file_level`, `.filepath`).
-* **`config.logging.console_level`**: A string specifying the console logging level (e.g. `debug`, `info`, `warning`, `error`, `fatal`, `none`).
+* **`config.logging.console_level` and `config.logging.file_level`**: Strings specifying the console and file logging levels (e.g. `debug`, `info`, `warning`, `error`, `fatal`, `none`).
 * **`config.error_mode`**: A string, either `'resilient'` (default) or `'fail_fast'`.
 
 ### 1.5. Parallelism Configuration
