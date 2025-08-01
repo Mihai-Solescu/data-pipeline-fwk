@@ -1,0 +1,35 @@
+@startuml storage_system
+' Style and layout settings
+!theme plain
+skinparam rectangle {
+  shadowing false
+  borderRadius 10
+}
+skinparam interface {
+    shadowing false
+}
+
+interface "IStorageBackend" as IBackend {
+  +write(key, data)
+  +read(key)
+  +exists(key)
+  +delete(key)
+}
+
+class "InMemoryBackend" implements IBackend
+class "HDF5Backend" implements IBackend
+
+class "StorageManager" as SM {
+  -l1: IStorageBackend
+  -l2: IStorageBackend
+}
+
+SM o-- "1" IBackend : (manages L1)
+SM o-- "1" IBackend : (manages L2)
+
+note right of SM
+  Orchestrates calls between two backend instances.
+  The manager's logic is independent of the
+  concrete backend implementations.
+end note
+@enduml

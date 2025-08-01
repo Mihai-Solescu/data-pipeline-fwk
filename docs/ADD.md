@@ -17,6 +17,10 @@ The parameter space is defined within the `config.params` struct, which is separ
 * **`config.params.grid`** (struct): Defines the parameters to be **swept over**. Each field is a parameter name, and its value is an array of values to test. The framework computes the Cartesian product of these arrays to generate the set of unique jobs.
 * **`config.params.filter`** (function handle, optional): A handle to a function with the signature `f(p, G)` that filters parameter runs. `p` is the struct for a single run, and `G` is a struct containing global grid metadata (e.g., `G.max.rank`). The function must return `true` to keep the run.
 
+#### A Note on the Filtering Approach
+
+The framework intentionally uses a single, global filter that is applied **upfront**. This design is the most computationally efficient approach. By establishing the definitive set of valid final runs *before* any execution begins, it guarantees that the stage-wise orchestrator only ever computes tasks that are known to contribute to a pre-approved result. This prevents the wasted computation that would occur if filters were applied midway through the pipeline after upstream work had already been completed.
+
 ### Stage Definition
 
 The `config.stages` struct defines the computational graph. Each **field** in the `config.stages` struct defines a single computational stage, where the **field name itself serves as the unique identifier** for the stage. The value of each field is a struct containing the stage's specific configuration:
@@ -101,7 +105,7 @@ The Provenance Hash is an SHA-256 hash derived from three and only three sources
 
 1. **Code Hash**: An SHA-256 hash of the stage's component `.m` file. Any change to the source code, including comments, will change this hash.
 2. **Input Hashes**: An SHA-256 hash derived from a deterministically sorted list of the Provenance Hashes of all direct data inputs. For stages with multiple inputs (e.g., fan-in nodes), the list of input hashes is sorted alphabetically before being hashed to ensure the result is deterministic and independent of execution order.
-3. **Granular Parameter Hash**: An SHA-256 hash of a struct containing only the specific subset of parameters the stage's function directly depends on.
+3. **Granular Parameter Hash**: An SHA-256 hash of a canonical representation of a struct containing the specific parameters the stage depends on. The struct's **field names** are the parameter names, and the **field values** are their specific values for the task. To ensure determinism, the fields of this struct are sorted alphabetically by name before being serialized and hashed.
 
 ### The Parameter Contract
 
@@ -124,6 +128,125 @@ A change to any upstream component automatically propagates downstream. For exam
 
 This mechanism ensures that the absolute minimum number of computations is performed. A stage is only re-run if its code, its direct parameters, or its direct inputs have changed, guaranteeing both maximum efficiency and uncompromising reproducibility.
 
+The full algorithm integrates configuration validation, progressive parametrization, and provenance-based hashing into a coherent workflow. The process is divided into two main phases: a one-time setup and the main execution loop.
+
+### Scenarios
+
+Here are a few scenarios that illustrate the desired outcomes of the provenance hashing system.
+
+#### Scenario 1: Baseline Caching ⚡
+
+This scenario demonstrates the framework's fundamental efficiency.
+
+* **Initial State:** A full pipeline has been successfully run, and all results are in the persistent cache.
+* **Action:** The user immediately re-runs the exact same pipeline with no changes to the code or configuration.
+* **Expected Outcome:** The framework should complete almost instantly. For every task, it calculates the Provenance Hash, finds a perfect match in the cache, and skips the execution. The logs should report all tasks as `CACHED`.
+
+#### Scenario 2: Cascading Invalidation from a Code Change 🧬
+
+This demonstrates how the framework guarantees reproducibility when the logic changes.
+
+* **Initial State:** The pipeline has been fully run.
+* **Action:** A scientist modifies `compute_svd.m` to use a more robust algorithm.
+* **Expected Outcome:** Upon re-running the pipeline:
+    1. All stages **upstream** of `compute_svd` (e.g., `compute_hankel`) are `CACHED` because their provenance is unchanged.
+    2. The `compute_svd` stage is **re-run** because its **Code Hash** has changed.
+    3. All stages **downstream** of `compute_svd` (e.g., `compute_numerical_derivative`) are **re-run** because their **Input Hashes** (which depend on the output of `compute_svd`) have changed. This demonstrates perfect cascading invalidation.
+
+#### Scenario 3: Cascading Invalidation from a Parameter Change ⚙️
+
+This shows how the framework handles changes in experimental conditions.
+
+* **Initial State:** The pipeline has been fully run with `dt = 0.001`.
+* **Action:** The user changes a single global parameter to `config.params.globals.dt = 0.002`.
+* **Expected Outcome:**
+    1. The `compute_master_timeseries` stage, which directly uses `dt`, is **re-run** because its **Parameter Hash** changes.
+    2. All stages that depend on its output (e.g., `compute_hankel`, `compute_svd`, etc.) are subsequently **re-run** due to changing **Input Hashes**.
+    3. Any unrelated branch of the pipeline that does not depend on `dt` would be skipped entirely.
+
+#### Scenario 4: Granular Caching with a Grid Expansion 🎯
+
+This highlights the power of progressive parametrization.
+
+* **Initial State:** The pipeline was run with `config.params.grid.truncation_rank = [10, 15]`.
+* **Action:** The user expands the experiment by changing the grid to `truncation_rank = [10, 15, 20]`.
+* **Expected Outcome:**
+    1. All stages **upstream** of the change (e.g., `compute_hankel`) are `CACHED`. Their results are reused across all runs.
+    2. For the `compute_svd` stage and all its dependents, the tasks corresponding to `rank=10` and `rank=15` are `CACHED`.
+    3. The framework **only executes the new tasks** corresponding to `rank=20`. This saves the maximum amount of time by only computing what is truly new.
+
+### Hashing as a Merkle DAG
+
+The provenance hashing system can be formally understood as the construction of a **Merkle DAG** (Directed Acyclic Graph). In this model, every unique data product in the framework is a node in the graph, and its **Provenance Hash serves as its unique identifier**.
+
+A key property of a Merkle DAG is that the identifier for any node is a cryptographic hash derived from its own content and the identifiers (hashes) of its parent nodes. In our framework:
+
+* A stage's **code and parameters** are its "content."
+* The **Provenance Hashes of its inputs** are the identifiers of its parent nodes.
+
+This model is not a different implementation, but rather the formal computer science pattern that describes our hashing strategy. It guarantees data integrity and provides a verifiable, tamper-proof audit trail for every result. Crucially, the Merkle DAG is built **iteratively** by processing stages in topological order (from inputs to outputs). This avoids any expensive runtime recursion, as the hash for any parent node is always computed and cached before it is needed by a child node.
+
+### Targeting stages
+
+The ability to specify target stages for selective execution is a planned optimization for a future release. This feature will allow users to run only the minimal subgraph of dependencies required to produce a desired output, which is ideal for debugging or regenerating specific results. Its implementation will be deferred to allow for the initial focus to remain on stabilizing the core framework's ability to robustly execute and cache the entire defined pipeline. This functionality can be cleanly integrated later by adding a reverse-dependency graph traversal step that prunes the execution plan before the main orchestrator begins its work.
+
+---
+
+## Algorithm Overview
+
+The full algorithm integrates configuration validation, progressive parametrization, and the iterative construction of a **Merkle DAG** to ensure efficiency and reproducibility.
+
+### Phase 1: Initialization & Validation ✅
+
+This phase runs once at the beginning of the pipeline to prepare for execution.
+
+1. **Load and Validate Config**: The framework loads the `config` struct, validates its structure, and ensures parameter names do not collide between `globals` and `grid`.
+
+2. **Generate and Filter Runs**: The full Cartesian product of `config.params.grid` is generated to create a list of all possible final runs. The optional `config.params.filter` function is then applied to produce the definitive **`Approved_Runs` list**, which dictates the scope of the experiment.
+
+3. **Build and Sort DAG**: The framework parses `config.stages` to build a Directed Acyclic Graph (DAG) of dependencies. It performs a **topological sort** on the graph to get a linear execution order.
+
+4. **Pre-hash Code**: The framework iterates through all stage functions and pre-computes their **Code Hash** from the respective `.m` files.
+
+### Phase 2: Orchestration & Execution (Building the Merkle DAG) 🚀
+
+This phase executes the main workflow by iteratively building the Merkle DAG of results.
+
+1. **Initialize Merkle DAG Representation**: An in-memory `containers.Map` is created. This map will store the computed **nodes** of the Merkle DAG, keyed by their **Provenance Hash**. Each node contains the output data and its associated metadata.
+
+2. **Iterate Through Stages**: The orchestrator loops through the stages in the topologically sorted order from Phase 1.
+
+3. **For Each Stage, Determine its Tasks**:
+    * **A. Identify Relevant Parameter Space 🔬**: The framework determines the minimal set of parameters that affect the current stage by taking the **union** of the stage's own `.params` and the `relevant_parameter_space` from the cached metadata of its inputs.
+    * **B. Generate Unique Tasks via Projection ⚡**: The framework generates the minimal sub-grid of unique tasks by **projecting** the `Approved_Runs` list onto the stage's relevant parameter space. This is an efficient `O(M)` in-memory operation (where `M` is the number of approved runs) that uses a hash map to find the unique set of tasks, ensuring that this overhead is negligible compared to the computational savings.
+
+4. **For Each Task, Compute its Node in the DAG**:
+    * **A. Compute Node's Merkle Hash**: The orchestrator calculates the task's final **Provenance Hash** (its Merkle hash) by assembling its three components:
+        1. The pre-computed **Code Hash**.
+        2. The **Granular Parameter Hash** from the task's specific parameter combination.
+        3. The **Input Hashes**, which are retrieved via fast lookups from the in-memory map of already-computed parent nodes.
+    * **B. Check Cache**: The framework checks for this Provenance Hash in the persistent store and the in-memory map.
+    * **C. Execute (if needed)**: If the hash is not found (a cache "miss"), the stage function is executed.
+    * **D. Add Node to DAG**: The output data and its metadata are stored in the in-memory map under the new Provenance Hash. If required by the storage policy, the data is also written to the persistent store.
+
+## 4. Caching and Metadata
+
+The framework's caching system is designed to ensure both computational efficiency and the persistent storage of rich metadata for every task. All data and metadata are stored in a single HDF5 file, indexed by the **Provenance Hash** of each unique computational task.
+
+---
+
+### HDF5 Storage Architecture
+
+The cache is organized around a "group-per-hash" model. Each unique **Provenance Hash** corresponds to a single **group** within the HDF5 file, which acts as a container for everything related to that specific computation.
+
+* **Data Outputs**: Primary data products (e.g., matrices, vectors) are stored as individual **datasets** within the group, named according to the `.outputs` configuration. The existence of these datasets depends on the `storage_policy`.
+
+* **Telemetry**: All historical metadata and telemetry for every execution of the task are stored within a single, appendable **dataset of JSON strings**.
+
+#### Example HDF5 Structure
+
+---
+
 ## 4. The Storage System
 
 The storage system is designed as a **two-tier architecture** to provide both high performance via in-memory caching and data integrity via persistent on-disk storage. The architecture strictly separates the caching logic from the persistence mechanism, allowing different storage backends to be used in the future without altering the core pipeline engine.
@@ -133,52 +256,84 @@ The storage system is designed as a **two-tier architecture** to provide both hi
 The following diagram illustrates the main components and relationships in the storage subsystem:
 
 ```plantuml
-!include diagrams/storage.plantuml
+!include diagrams/storage_system.puml
+```
+
+The following is the old storage diagram:
+
+```plantuml
+!include diagrams/storage_old.puml
 ```
 
 ### Architectural Overview
 
-1. **The `StorageManager` (L1 Cache Handler):** This component is the single point of contact for the `Executor`. It owns the fast, volatile in-memory cache (`containers.Map`) that exists for the duration of a single pipeline run. Its only job is to orchestrate data access, serving results from memory when possible and delegating to the `StorageBackend` when necessary.
+The system is composed of three primary abstractions:
 
-2. **The `StorageBackend` (L2 Persistent Store):** This is an interface (an abstract class) that defines how to save, load, and delete data from a slow, durable, on-disk store. Concrete implementations (`HDF5Backend`, `SQLiteBackend`) handle the specifics of a given storage technology. The backend knows nothing about the L1 cache.
+1. **The `StorageManager` (Orchestrator):** This component is the single point of contact for the `Executor`. It does not handle storage itself but orchestrates the flow of data between two specialized backend instances, both of which implement the same `IStorageBackend` interface.
 
-The `Executor` communicates only with the `StorageManager`, which in turn commands the `StorageBackend`.
+2. **The L1 `IStorageBackend` (In-Memory Store):** This is a concrete implementation of the backend interface that manages the fast, volatile in-memory cache (e.g., `InMemoryBackend`).
+
+3. **The L2 `IStorageBackend` (Persistent Store):** This is another concrete implementation that manages the slow, durable, on-disk store (e.g., `HDF5Backend`).
+
+The `Executor` communicates only with the `StorageManager`, which delegates commands to the appropriate L1 or L2 backend.
 
 ### The StorageManager API and Logic
 
-The `StorageManager` is instantiated at the start of a run with a configured `StorageBackend`. Its API gives the `Executor` explicit control over the caching and persistence lifecycle.
+The `StorageManager` is instantiated at the start of a run with two configured `IStorageBackend` instances (one for L1, one for L2).
 
 * **`data = load(hash)`:** This is the primary data retrieval method.
-    1. It first checks the L1 in-memory cache. If the `hash` exists (**cache hit**), the data is returned instantly.
-    2. If the data is not in L1 (**cache miss**), the manager calls `load(hash)` on its `StorageBackend` to fetch the data from disk.
-    3. The retrieved data is then **promoted** into the L1 cache before being returned to the caller.
+    1. It first calls `exists(hash)` on the **L1 backend**. If true (**cache hit**), it calls `read(hash)` on the L1 backend and returns the data.
+    2. If the data is not in L1 (**cache miss**), the manager calls `read(hash)` on the **L2 backend**.
+    3. The retrieved data is then **promoted** by calling `write(hash, data)` on the **L1 backend** before being returned.
 
-* **`cache(hash, data)`:** This method writes a newly computed result **only** to the L1 in-memory cache. This action ensures the data is immediately available for subsequent stages within the same pipeline run, regardless of the persistence policy.
+* **`cache(hash, data)`:** This method writes a result to the L1 cache by calling `write(hash, data)` on the **L1 backend**.
 
-* **`persist(hash)`:** This method promotes data from the L1 cache to the L2 persistent store. It takes only the `hash`, retrieves the corresponding data from the in-memory cache, and commands the `StorageBackend` to save it. This method is called by the `Executor` only when a `StoragePolicy` dictates that a result should be persisted.
+* **`persist(hash)`:** This method promotes data from L1 to L2.
+    1. It calls `read(hash)` on the **L1 backend** to get the data.
+    2. It then calls `write(hash, data)` on the **L2 backend**.
 
-### The StorageBackend Interface
+### The IStorageBackend Interface
 
-This defines a strict contract for any persistent storage technology to be compliant with the framework.
+This defines a strict contract for **any** storage technology—whether in-memory or on-disk—to be compliant with the framework.
 
-* **Interface Definition:** A `StorageBackend` must implement the following methods:
-  * `save(key, data)`: Writes a data object to the persistent store, indexed by its key.
-  * `data = load(key)`: Retrieves a data object from the persistent store.
-  * `flag = exists(key)`: Returns `true` if the key exists in the persistent store.
-  * `delete(key)`: Removes a key and its associated data from the persistent store.
+* **Interface Definition:** An `IStorageBackend` must implement the following methods:
+  * `write(key, data)`: Writes a data object, indexed by its key.
+  * `data = read(key)`: Retrieves a data object.
+  * `flag = exists(key)`: Returns `true` if the key exists.
+  * `delete(key)`: Removes a key and its associated data.
+
+## Concurrency and Scalability
+
+To support parallel execution, the storage system must be thread-safe. This is achieved without modifying the core storage backends by using the **Decorator Pattern**, which allows for adding new behaviors (like locking) to existing objects dynamically.
+
+### Handling Concurrency with Decorators
+
+A generic `ConcurrentStorageDecorator` can be wrapped around any `IStorageBackend` instance to make it thread-safe. This decorator's only responsibility is to acquire a lock before an operation and release it afterward.
+
+```plantuml
+!include diagrams/storage_concurrency.puml
+```
+
+### Achieving High Throughput with Sharding
+
+For very high I/O workloads, a single persistent file can become a bottleneck. **Sharding** addresses this by distributing data across multiple files. A `MultiShardHandler` can manage this distribution. Because it also implements the `IStorageBackend` interface, the same `ConcurrentStorageDecorator` can be used to make it thread-safe, with each shard being locked independently.
+
+```plantuml
+!include diagrams/storage_sharding.puml
+```
 
 ### Garbage Collection
 
-The garbage collection utility operates directly on the `StorageBackend`.
+The garbage collection utility operates directly on the **L2 `IStorageBackend` instance** held by the `StorageManager`.
 
 * **API:** `pipeline.gc(config)`
 * **Algorithm (Mark and Sweep):**
   * **Mark:** The utility first calculates the complete set of all "live" Provenance Hashes that are reachable from the provided pipeline configuration.
-  * **Sweep:** It then iterates through all keys in the `StorageBackend`. For any key that is not in the "live" set, it calls the `backend.delete(key)` method to reclaim storage space.
+  * **Sweep:** It then iterates through all keys in the `IStorageBackend` instance. For any key that is not in the "live" set, it calls the `backend.delete(key)` method to reclaim storage space.
 
 ---
 
-### 2.2. The Orchestrator (Stateful Task-Based Scheduler)
+## 2.2. The Orchestrator (Stateful Task-Based Scheduler)
 
 The **Orchestrator** is the central coordinating component of the framework. It operates as a stateful, task-based scheduler, and its workflow is as follows:
 
@@ -191,7 +346,7 @@ The **Orchestrator** is the central coordinating component of the framework. It 
     * If `config.error_mode` is `'resilient'`, the **Orchestrator** traverses the graph downstream from the failed job, marks all its dependents as `CANCELLED`, and continues executing other independent branches.
 5. **Reporting:** At the end of the run, the **Orchestrator** provides a summary report of all job statuses.
 
-#### 2.2.1. Configuration Validation Routine
+### Configuration Validation Routine
 
 Before any pipeline execution begins, the user's configuration undergoes a rigorous, multi-phase validation process. This is performed by dedicated validator components before the `Orchestrator` is created, ensuring the system fails fast on any invalid input. The validation is performed in three phases:
 
@@ -252,7 +407,7 @@ The workflow is as follows:
 
 ---
 
-## 2.6. The Logging System
+## 6. The Logging System
 
 To provide clear feedback to the user, the framework implements a flexible, dual-output logging system.
 

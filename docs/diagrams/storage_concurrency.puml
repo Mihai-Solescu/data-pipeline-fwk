@@ -1,0 +1,37 @@
+@startuml storage_concurrency
+' Style and layout settings
+!theme plain
+skinparam rectangle {
+  shadowing false
+  borderRadius 10
+}
+skinparam interface {
+  shadowing false
+}
+
+interface "IStorageBackend" as IHandler {
+  +write(key, data)
+  +read(key)
+  +getLock(key)
+}
+
+class "HDF5Backend" implements IHandler {
+  ' Concrete implementation
+}
+
+class "ConcurrentStorageDecorator" implements IHandler {
+  -backend: IStorageBackend
+  +write(key, data)
+  +read(key)
+}
+
+note right of ConcurrentStorageDecorator
+  1. Calls backend.getLock(key)
+  2. Acquires lock
+  3. Calls backend.write() or backend.read()
+  4. Releases lock
+end note
+
+ConcurrentStorageDecorator o-- "1" HDF5Backend : wraps
+
+@enduml
