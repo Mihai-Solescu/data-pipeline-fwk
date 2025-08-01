@@ -1,4 +1,4 @@
-function out = compute_model_and_reconstruction(in, p)
+function out = compute_reconstruction(in, p)
 
     % Extract forcing term (r-th right singular vector)
     out.forcing_term = in.V(:, p.truncation_rank);
