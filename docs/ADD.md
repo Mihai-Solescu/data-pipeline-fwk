@@ -58,6 +58,8 @@ The `config` struct also contains fields for controlling execution behavior:
 * **`config.logging.console_level` and `config.logging.file_level`**: Strings specifying the console and file logging levels (e.g. `debug`, `info`, `warning`, `error`, `fatal`, `none`).
 * **`config.error_mode`**: A string, either `'resilient'` (default) or `'fail_fast'`.
 
+> **Note:** Either both `config.logging.filepath` and `config.logging.file_level` must be specified together, or neither, else the framework will throw an error during initialization.
+
 ### 1.5. Parallelism Configuration
 
 * **`config.num_workers`**: An integer specifying the number of parallel workers for executing jobs. If set to `1`, execution is serial. If greater than `1`, a parallel pool of the specified size is used. If omitted or set to `'auto'`, the framework uses the default parallel pool size determined by MATLAB.

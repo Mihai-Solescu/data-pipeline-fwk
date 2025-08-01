@@ -20,6 +20,17 @@ We use `mathworks/advanced-logger` for all logging. When writing or modifying co
 2. **Do not configure the logger directly inside your component or class.** Configuration (e.g., setting log levels or file paths) is handled centrally by the `pipeline.run()` function. Your components should only retrieve the named logger instance.
 3. **Use a specific named logger.** Always retrieve a logger with a name that corresponds to your component, using the hierarchical naming convention (e.g., `mlog.Logger('pipeline:component:subcomponent')`). This ensures granular control and clear context in the log output.
 4. **Log all errors before handling them.** If a `try/catch` block is used to handle an error, the `catch` block must first log the error (at `mlog.Level.ERROR` or `mlog.Level.FATAL`) before any further processing or a graceful exit. This ensures that a complete record of the error is always preserved.
+5. **Use correct logging argument patterns.** The advanced-logger uses `sprintf` formatting. The first argument is always the format string, and subsequent arguments are the values to substitute. For structured messages with identifiers, include the identifier in the format string:
+
+   ```matlab
+   % CORRECT: Identifier and message in single format string
+   logger.debug('pipeline:component:EventName: Description with %s and %d', stringVar, numVar);
+   
+   % INCORRECT: Separate identifier and message arguments
+   logger.debug('pipeline:component:EventName', 'Description with %s', stringVar);
+   ```
+
+   The incorrect pattern fails because the logger treats the identifier as the format string and ignores subsequent arguments when no format specifiers are present.
 
 ---
 
@@ -60,18 +71,19 @@ This taxonomy details all defined log messages originating from the `pipeline:St
 
 ---
 
-### Validator
+### ConfigValidator
 
 This taxonomy covers logs and errors generated during the initial validation of the `config` struct.
 
 | Identifier | Log Level | Description |
 | :--- | :--- | :--- |
-| `pipeline:Validator:MissingRequiredField` | `FATAL` | A required field (e.g., `config.stages`) is missing from the configuration. |
-| `pipeline:Validator:InvalidFieldType` | `FATAL` | A field has an incorrect data type (e.g., `stages` is not a struct). |
-| `pipeline:Validator:ParameterNameCollision` | `FATAL` | A parameter name is defined in both `globals` and `grid`. |
-| `pipeline:Validator:CircularDependency` | `FATAL` | The stage graph is not a valid DAG; a cycle was detected. |
-| `pipeline:Validator:InvalidDependencyTarget` | `FATAL` | An input recipe in a stage's `.inputs` field points to a stage or output that does not exist. |
-| `pipeline:Validator:UnexpectedField` | `WARN` | An unrecognized field was found in the `config` struct. The field will be ignored. |
+| `pipeline:ConfigValidator:MissingRequiredField` | `FATAL` | A required field (e.g., `config.stages`) is missing from the configuration. |
+| `pipeline:ConfigValidator:InvalidFieldType` | `FATAL` | A field has an incorrect data type (e.g., `stages` is not a struct). |
+| `pipeline:ConfigValidator:ParameterNameCollision` | `FATAL` | A parameter name is defined in both `globals` and `grid`. |
+| `pipeline:ConfigValidator:IncompleteLoggingConfig` | `FATAL` | Either `config.logging.filepath` or `config.logging.file_level` is specified without the other. Both must be provided together for file logging. |
+| `pipeline:ConfigValidator:CircularDependency` | `FATAL` | The stage graph is not a valid DAG; a cycle was detected. |
+| `pipeline:ConfigValidator:InvalidDependencyTarget` | `FATAL` | An input recipe in a stage's `.inputs` field points to a stage or output that does not exist. |
+| `pipeline:ConfigValidator:UnexpectedField` | `WARN` | An unrecognized field was found in the `config` struct. The field will be ignored. |
 
 ## Implementation Details
 
@@ -81,10 +93,10 @@ To ensure that all framework actions, including configuration validation errors,
 
 1. **Initialize with Defaults:** The very first action upon entering `pipeline.run` is to configure the `mlog` system with safe, hardcoded defaults (e.g., log to the console at `INFO` level). This guarantees that a logger is immediately available to report any subsequent errors.
 
-2. **Partial Validation of Logging Config:** The `Validator` is invoked to check *only* the `config.logging` struct. This isolated check ensures the user-provided logging settings are syntactically correct before they are applied.
+2. **Partial Validation of Logging Config:** The `ConfigValidator` is invoked to check *only* the `config.logging` struct. This isolated check ensures the user-provided logging settings are syntactically correct before they are applied.
 
 3. **Reconfigure Logger:** If the logging configuration is valid, the `mlog` system is immediately reconfigured using the user's settings from `config.logging`.
 
-4. **Full Configuration Validation:** The `Validator` is invoked again to validate the remainder of the `config` struct.
+4. **Full Configuration Validation:** The `ConfigValidator` is invoked again to validate the remainder of the `config` struct.
 
 This sequence ensures that if the user's logging configuration itself is invalid, the error is caught and reported by the default logger. All subsequent validation warnings and errors are then correctly routed to the user's specified destinations (e.g., a log file).
