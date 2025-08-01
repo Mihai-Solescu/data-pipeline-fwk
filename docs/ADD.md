@@ -1,6 +1,6 @@
 # Architecture Design Document: General-Purpose Scientific Pipeline Framework
 
-**Version:** 0.27.1
+**Version:** 0.28.1
 **Date:** 2025-08-01
 
 ---
@@ -9,7 +9,7 @@
 
 The `config` struct defines the entire workflow. It is the highest-level policy, containing the parameter space, the computational graph, and execution settings.
 
-### Parameter Space Definition
+### 1.1. Parameter Space Definition
 
 The parameter space is defined within the `config.params` struct, which is separated into two distinct parts. **Note:** Parameter names must be unique across `globals` and `grid` to prevent ambiguity. This is enforced by the configuration validation routine.
 
@@ -21,7 +21,7 @@ The parameter space is defined within the `config.params` struct, which is separ
 
 The framework intentionally uses a single, global filter that is applied **upfront**. This design is the most computationally efficient approach. By establishing the definitive set of valid final runs *before* any execution begins, it guarantees that the stage-wise orchestrator only ever computes tasks that are known to contribute to a pre-approved result. This prevents the wasted computation that would occur if filters were applied midway through the pipeline after upstream work had already been completed.
 
-### Stage Definition
+### 1.2. Stage Definition
 
 The `config.stages` struct defines the computational graph. Each **field** in the `config.stages` struct defines a single computational stage, where the **field name itself serves as the unique identifier** for the stage. The value of each field is a struct containing the stage's specific configuration:
 
@@ -39,18 +39,18 @@ The `config.stages` struct defines the computational graph. Each **field** in th
 
 > **Note:** The implementation of advanced features—specifically the **conditional storage policy** and the full input resolver API—will be deferred to a later development stage. These features are modular, non-breaking extensions to the core architecture. The initial release will focus on stabilizing the fundamental caching and dependency-tracking logic, which uses provenance hashing and simple string-based dependency recipes. For details on the planned resolver system, see [The Dependency Recipe and Resolution System](#5-the-dependency-recipe-and-resolution-system).
 
-### Output Storage Location
+### 1.3. Output Storage Location
 
 * **`config.output_filename`**: The filename for persistent storage.
 
-### Logging and Error Configuration
+### 1.4. Logging and Error Configuration
 
 The `config` struct also contains fields for controlling execution behavior:
 
 * **`config.logging`**: A struct containing logging settings (`.console_level`, `.file_level`, `.filepath`).
 * **`config.error_mode`**: A string, either `'resilient'` (default) or `'fail_fast'`.
 
-### Parallelism Configuration
+### 1.5. Parallelism Configuration
 
 * **`config.num_workers`**: An integer specifying the number of parallel workers for executing jobs. If set to `1`, execution is serial. If greater than `1`, a parallel pool of the specified size is used. If omitted or set to `'auto'`, the framework uses the default parallel pool size determined by MATLAB.
 
@@ -60,7 +60,7 @@ The `config` struct also contains fields for controlling execution behavior:
 
 The framework interacts with user-provided code through three distinct types of function handles, each with a specific signature tailored to its purpose.
 
-### Stage Computation Function
+### 2.1. Stage Computation Function
 
 This is the primary function that performs the scientific calculation for a stage. Its signature is designed to be clean and decoupled from the overall framework configuration.
 
@@ -71,7 +71,7 @@ This is the primary function that performs the scientific calculation for a stag
 * **Return Value:**
   * `outputs`: A struct where each **field name must exactly match** an output name defined in the stage's `.outputs` configuration. The framework uses these names to map the returned data to the correct outputs, so the order of fields in the struct does not matter.
 
-### Parameter Filter Function
+### 2.2. Parameter Filter Function
 
 This function is used to selectively discard runs from the generated parameter grid before execution begins. Its signature provides the context of the single run relative to the entire experimental space.
 
@@ -81,7 +81,7 @@ This function is used to selectively discard runs from the generated parameter g
   * `G`: The complete **global grid** struct (`config.params.grid`), passed by value. This allows for powerful relative logic by giving the function access to the full range of all tested parameter values (e.g., `max(G.rank)`).
 * **Return Value:** Must return `true` to keep the run or `false` to discard it.
 
-### Conditional Storage Policy Function
+### 2.3. Conditional Storage Policy Function
 
 This function is used to define complex rules for whether a stage's output should be saved to the persistent HDF5 store. Its signature is identical to the parameter filter's, providing full context for the decision.
 
@@ -99,7 +99,7 @@ The framework's guarantee of reproducibility and computational efficiency is bui
 
 This fingerprint is called the **Provenance Hash**.
 
-### The Three Components of the Provenance Hash
+### 3.1. The Three Components of the Provenance Hash
 
 The Provenance Hash is an SHA-256 hash derived from three and only three sources. It is the single, consistent formula used for all data products in the system.
 
@@ -107,7 +107,7 @@ The Provenance Hash is an SHA-256 hash derived from three and only three sources
 2. **Input Hashes**: An SHA-256 hash derived from a deterministically sorted list of the Provenance Hashes of all direct data inputs. For stages with multiple inputs (e.g., fan-in nodes), the list of input hashes is sorted alphabetically before being hashed to ensure the result is deterministic and independent of execution order.
 3. **Granular Parameter Hash**: An SHA-256 hash of a canonical representation of a struct containing the specific parameters the stage depends on. The struct's **field names** are the parameter names, and the **field values** are their specific values for the task. To ensure determinism, the fields of this struct are sorted alphabetically by name before being serialized and hashed.
 
-### The Parameter Contract
+### 3.2. The Parameter Contract
 
 The construction of the **Granular Parameter Hash** is governed by a strict contract between the user's configuration and the framework's executor to ensure precision and prevent unnecessary recomputations.
 
@@ -117,7 +117,7 @@ The construction of the **Granular Parameter Hash** is governed by a strict cont
 
 If a parameter is declared in `.params` but is not found in the function's code, the framework should proceed with the computation but print a clear warning to the console (e.g. `WARNING in stage 'compute_svd': Parameter 'dt' is declared in '.params' but does not appear to be used in the function 'compute_svd.m'. Including it may cause unnecessary recomputations if its value changes.`).
 
-### Cascading Invalidation and Efficiency
+### 3.3. Cascading Invalidation and Efficiency
 
 This hashing design creates a "keychain" of cryptographic dependency.
 
@@ -130,7 +130,7 @@ This mechanism ensures that the absolute minimum number of computations is perfo
 
 The full algorithm integrates configuration validation, progressive parametrization, and provenance-based hashing into a coherent workflow. The process is divided into two main phases: a one-time setup and the main execution loop.
 
-### Scenarios
+### 3.4. Scenarios
 
 Here are a few scenarios that illustrate the desired outcomes of the provenance hashing system.
 
@@ -175,7 +175,7 @@ This highlights the power of progressive parametrization.
     2. For the `compute_svd` stage and all its dependents, the tasks corresponding to `rank=10` and `rank=15` are `CACHED`.
     3. The framework **only executes the new tasks** corresponding to `rank=20`. This saves the maximum amount of time by only computing what is truly new.
 
-### Hashing as a Merkle DAG
+### 3.5. Hashing as a Merkle DAG
 
 The provenance hashing system can be formally understood as the construction of a **Merkle DAG** (Directed Acyclic Graph). In this model, every unique data product in the framework is a node in the graph, and its **Provenance Hash serves as its unique identifier**.
 
@@ -186,7 +186,7 @@ A key property of a Merkle DAG is that the identifier for any node is a cryptogr
 
 This model is not a different implementation, but rather the formal computer science pattern that describes our hashing strategy. It guarantees data integrity and provides a verifiable, tamper-proof audit trail for every result. Crucially, the Merkle DAG is built **iteratively** by processing stages in topological order (from inputs to outputs). This avoids any expensive runtime recursion, as the hash for any parent node is always computed and cached before it is needed by a child node.
 
-### Targeting stages
+### 3.6. Targeting stages
 
 The ability to specify target stages for selective execution is a planned optimization for a future release. This feature will allow users to run only the minimal subgraph of dependencies required to produce a desired output, which is ideal for debugging or regenerating specific results. Its implementation will be deferred to allow for the initial focus to remain on stabilizing the core framework's ability to robustly execute and cache the entire defined pipeline. This functionality can be cleanly integrated later by adding a reverse-dependency graph traversal step that prunes the execution plan before the main orchestrator begins its work.
 
@@ -233,7 +233,7 @@ This phase executes the main workflow by iteratively building the Merkle DAG of 
 
 The framework's caching system is designed to ensure both computational efficiency and the persistent storage of rich metadata for every task. All data and metadata are stored in a single HDF5 file, indexed by the **Provenance Hash** of each unique computational task.
 
-### HDF5 Storage Architecture
+### 5.1. HDF5 Storage Architecture
 
 The cache is organized around a "group-per-hash" model. Each unique **Provenance Hash** corresponds to a single **group** within the HDF5 file, which acts as a container for everything related to that specific computation.
 
@@ -254,7 +254,7 @@ The cache is organized around a "group-per-hash" model. Each unique **Provenance
         - '{"timestamp": "2025-08-01T11:41:10Z", "status": "SUCCESS", "duration_sec": 14.8}'
 ```
 
-### Telemetry and Cost Metrics
+### 5.2. Telemetry and Cost Metrics
 
 After **every** execution of a task, whether it succeeds or fails, a new telemetry record is generated and stored. This is achieved by creating a MATLAB `struct` with all available information, serializing it to a JSON string, and appending it to the `metadata` dataset.
 
@@ -266,7 +266,7 @@ This "self-describing record" approach is highly resilient to changes, as new fi
 * `memory_usage_MB`
 * `error_message` (if applicable)
 
-### Multi-Level Cache Resolution
+### 5.3. Multi-Level Cache Resolution
 
 When the orchestrator needs to resolve a dependency, it checks the cache and identifies one of three states:
 
@@ -288,7 +288,7 @@ When the orchestrator needs to resolve a dependency, it checks the cache and ide
 
 The storage system is designed as a **two-tier architecture** to provide both high performance via in-memory caching and data integrity via persistent on-disk storage. The architecture strictly separates the caching logic from the persistence mechanism, allowing different storage backends to be used in the future without altering the core pipeline engine.
 
-### Storage System Diagram
+### 6.1. Storage System Diagram
 
 The following diagram illustrates the main components and relationships in the storage subsystem:
 
@@ -302,7 +302,7 @@ The following is the old storage diagram:
 !include diagrams/storage_old.puml
 ```
 
-### Architectural Overview
+### 6.2. Architectural Overview
 
 The system is composed of three primary abstractions:
 
@@ -314,7 +314,7 @@ The system is composed of three primary abstractions:
 
 The `Executor` communicates only with the `StorageManager`, which delegates commands to the appropriate L1 or L2 backend.
 
-### The StorageManager API and Logic
+### 6.3. The StorageManager API and Logic
 
 The `StorageManager` is instantiated at the start of a run with two configured `IStorageBackend` instances (one for L1, one for L2).
 
@@ -329,7 +329,7 @@ The `StorageManager` is instantiated at the start of a run with two configured `
     1. It calls `read(hash)` on the **L1 backend** to get the data.
     2. It then calls `write(hash, data)` on the **L2 backend**.
 
-### The IStorageBackend Interface
+### 6.4. The IStorageBackend Interface
 
 This defines a strict contract for **any** storage technology—whether in-memory or on-disk—to be compliant with the framework.
 
@@ -339,11 +339,11 @@ This defines a strict contract for **any** storage technology—whether in-memor
   * `flag = exists(key)`: Returns `true` if the key exists.
   * `delete(key)`: Removes a key and its associated data.
 
-## Concurrency and Scalability
+### 6.5. Concurrency and Scalability
 
 To support parallel execution, the storage system must be thread-safe. This is achieved without modifying the core storage backends by using the **Decorator Pattern**, which allows for adding new behaviors (like locking) to existing objects dynamically.
 
-### Handling Concurrency with Decorators
+#### Handling Concurrency with Decorators
 
 A generic `ConcurrentStorageDecorator` can be wrapped around any `IStorageBackend` instance to make it thread-safe. This decorator's only responsibility is to acquire a lock before an operation and release it afterward.
 
@@ -351,7 +351,7 @@ A generic `ConcurrentStorageDecorator` can be wrapped around any `IStorageBacken
 !include diagrams/storage_concurrency.puml
 ```
 
-### Achieving High Throughput with Sharding
+#### Achieving High Throughput with Sharding
 
 For very high I/O workloads, a single persistent file can become a bottleneck. **Sharding** addresses this by distributing data across multiple files. A `MultiShardHandler` can manage this distribution. Because it also implements the `IStorageBackend` interface, the same `ConcurrentStorageDecorator` can be used to make it thread-safe, with each shard being locked independently.
 
@@ -359,7 +359,7 @@ For very high I/O workloads, a single persistent file can become a bottleneck. *
 !include diagrams/storage_sharding.puml
 ```
 
-### Garbage Collection
+### 6.6. Garbage Collection
 
 The garbage collection utility operates directly on the **L2 `IStorageBackend` instance** held by the `StorageManager`.
 
@@ -367,6 +367,41 @@ The garbage collection utility operates directly on the **L2 `IStorageBackend` i
 * **Algorithm (Mark and Sweep):**
   * **Mark:** The utility first calculates the complete set of all "live" Provenance Hashes that are reachable from the provided pipeline configuration.
   * **Sweep:** It then iterates through all keys in the `IStorageBackend` instance. For any key that is not in the "live" set, it calls the `backend.delete(key)` method to reclaim storage space.
+
+---
+
+## 7. The Logging System
+
+To provide clear, contextual feedback to the user and aid in debugging, the framework implements a robust logging system built on the `mathworks/advanced-logger`. This system is designed for flexibility, centralized control, and graceful error handling.
+
+### 7.1. Logger Implementation Strategy
+
+The framework will use `mathworks/advanced-logger` directly, leveraging its **named singleton pattern** rather than passing logger objects through dependency injection. This approach simplifies component constructors and reduces "plumbing" overhead while retaining all the benefits of centralized configuration.
+
+* **Centralized Configuration:** The core `pipeline.run()` function is the single point of control for logger configuration. It reads the user's `config.logging` settings and applies them globally to all named loggers used throughout the framework. This guarantees consistent behavior across the entire pipeline.
+* **Named Singletons:** Each internal component will obtain its specific logger instance by calling `mlog.Logger('ComponentName')` directly. A hierarchical naming convention (e.g., `pipeline:orchestrator`, `pipeline:storage:manager`) will be used to provide clear context in log outputs.
+* **No Internal Configuration:** Components will not configure their own logger instances. They will rely on the central configuration established by `pipeline.run()`.
+
+### 7.2. Dual-Output and Verbosity
+
+The logging system is capable of writing to two destinations simultaneously, with independent verbosity levels.
+
+* **Outputs:** Log messages can be sent to the MATLAB Command Window and a user-specified log file. If `config.logging.filepath` is not provided, output will only be sent to the console.
+* **Verbosity Levels:** The system supports a rich set of verbosity levels, configurable independently for the console and the log file:
+  * `mlog.Level.INFO` (Default): Provides a high-level summary of pipeline progress, including job start/end, caching events, and key milestones.
+  * `mlog.Level.DEBUG`: A verbose output for developers, including fine-grained details like Provenance Hashes, resolver steps, and low-level I/O operations.
+  * `mlog.Level.WARNING`: Reports on potential issues that do not immediately halt the pipeline.
+  * `mlog.Level.ERROR`: Documents serious issues within a job that require attention.
+  * `mlog.Level.FATAL`: Reserved for unrecoverable errors that force a pipeline shutdown.
+  * `mlog.Level.OFF`: Suppresses all output.
+
+### 7.3. Robust Error Logging and Handling
+
+The framework prioritizes logging all errors before handling them, ensuring critical information is never lost. This approach is fundamental to enabling the `config.error_mode` functionality.
+
+* **Log Before Handling:** All errors caught within `try/catch` blocks (especially in the `Executor`) will be logged using the `mlog.Level.ERROR` or `mlog.Level.FATAL` level, including the full message and stack trace. This is done *before* the framework decides how to proceed based on `config.error_mode`.
+* **Graceful Termination:** Instead of allowing unhandled errors to crash the MATLAB process, the framework will log fatal errors and perform a controlled shutdown. This ensures that resources like file locks are properly released, and the final state of the pipeline is clean and predictable.
+* **Consistency with `config.error_mode`:** This controlled approach allows the `Orchestrator` to reliably respond to job failures according to the `config.error_mode` (`'resilient'` or `'fail_fast'`). The logged fatal error is the signal that triggers this state machine transition.
 
 ---
 
@@ -443,17 +478,6 @@ The workflow is as follows:
     * **For simple recipes**: The `Resolver` recursively calculates the `ProvenanceHash` for the single matching result. It returns this hash and any `.transform()` function to the `Orchestrator`.
 
 ---
-
-## 6. The Logging System
-
-To provide clear feedback to the user, the framework implements a flexible, dual-output logging system.
-
-* **Outputs:** The logger can write to two destinations simultaneously: the MATLAB Command Window and a user-specified log file. The log file is optional; if `config.logging.filepath` is not provided, output is sent only to the console.
-* **Verbosity Levels:** The system supports three named levels, configurable independently for the console and the file:
-  * `'info'` (Default): Provides a high-level summary of progress, including which jobs are starting, finishing, and whether they were cached.
-  * `'debug'`: A verbose output for developers, including detailed information like Provenance Hashes and resolver steps.
-  * `'silent'`: Suppresses all output except for fatal errors and the final summary.
-* **Error Logging:** All errors caught by the Executor are logged with their full message and stack trace, regardless of the verbosity level, to ensure critical information is never lost.
 
 ## 3. Implementation Details and Constraints
 

@@ -6,9 +6,20 @@ Thank you for your interest in contributing to this project! This document provi
 
 ## Development Philosophy
 
-Our goal is to create a robust, maintainable, and well-tested codebase. We adhere to a Test-Driven Development (TDD) model. Before implementing any new feature, corresponding tests should be written to define and verify its behavior.
+Our goal is to create a robust, maintainable, and well-tested codebase. We adhere to a **Test-Driven Development (TDD)** model. Before implementing any new feature, corresponding tests should be written to define and verify its behavior.
 
 All code should be clean, well-commented, and adhere to the architectural principles laid out in the `docs/ADD.md`.
+
+### Specific Guidelines
+
+Testing concurrent threads has to be done using the **Asynchronous Test Harness with Timeout** pattern, in order to ensure that tests do not hang indefinitely. This is crucial for maintaining the reliability of our test suite.
+
+We use `mathworks/advanced-logger` for all logging. When writing or modifying code:
+
+1. **Do not use `disp()`, `fprintf()`, or `warning()` for framework-related messages.** All informational, debug, and error messages must go through the logger.
+2. **Do not configure the logger directly inside your component or class.** Configuration (e.g., setting log levels or file paths) is handled centrally by the `pipeline.run()` function. Your components should only retrieve the named logger instance.
+3. **Use a specific named logger.** Always retrieve a logger with a name that corresponds to your component, using the hierarchical naming convention (e.g., `mlog.Logger('pipeline:component:subcomponent')`). This ensures granular control and clear context in the log output.
+4. **Log all errors before handling them.** If a `try/catch` block is used to handle an error, the `catch` block must first log the error (at `mlog.Level.ERROR` or `mlog.Level.FATAL`) before any further processing or a graceful exit. This ensures that a complete record of the error is always preserved.
 
 ---
 
