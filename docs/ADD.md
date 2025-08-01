@@ -5,6 +5,13 @@
 
 ---
 
+## Source Code and Project Structure
+
+* **`+pipeline/`**: The main package folder containing the public API (`run`, `get`, `gc`).
+* **`docs/`**: Contains all project documentation.
+* **`examples/`**: Contains self-contained example projects.
+* **`tests/`**: Contains all unit and integration tests.
+
 ## 1. The Configuration
 
 The `config` struct defines the entire workflow. It is the highest-level policy, containing the parameter space, the computational graph, and execution settings.
@@ -440,7 +447,7 @@ Before any pipeline execution begins, the user's configuration undergoes a rigor
 
 ---
 
-## 5. The Dependency Recipe and Resolution System
+## 8. The Dependency Recipe and Resolution System
 
 Dependencies are defined programmatically using a fluent, object-oriented **Recipe**. A Recipe is a stateful **query builder** object that creates a detailed, declarative request for a specific data product.
 
@@ -527,14 +534,7 @@ The framework's parallel execution model is safe only if the user-provided code 
 
 ---
 
-## 4. Source Code and Project Structure
-
-* **`+pipeline/`**: The main package folder containing the public API (`run`, `get`, `gc`).
-* **`docs/`**: Contains all project documentation.
-* **`examples/`**: Contains self-contained example projects.
-* **`tests/`**: Contains all unit and integration tests.
-
-## 5. Architectural Principles
+## Architectural Principles
 
 Our architecture is guided by a core philosophy, translated into five technical rules:
 

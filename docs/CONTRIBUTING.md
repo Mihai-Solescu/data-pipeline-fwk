@@ -37,34 +37,54 @@ All custom error and log identifiers thrown or logged by the framework must foll
 * **`<ComponentName>`:** The CamelCase name of the internal component where the error or log originates (e.g., `StorageManager`, `Resolver`).
 * **`<Identifier>`:** A concise, CamelCase name for the specific error or log event (e.g., `OverwriteAttempt`, `JobComplete`).
 
-### Taxonomy of `StorageManager` Outputs
+### StorageManager
 
-This section details all defined errors and log messages originating from the `pipeline:StorageManager` component.
+This taxonomy details all defined log messages originating from the `pipeline:StorageManager` component.
 
-#### **Errors**
-
-Errors are thrown for unrecoverable situations or violations of the framework's architectural contract.
-
-| Error ID | Description & Trigger |
-| :--- | :--- |
-| `pipeline:StorageManager:FileLocked` | **Fatal.** Thrown by the constructor if it detects a `.lock` file already exists for the target HDF5 cache. This prevents two pipeline instances from corrupting the same cache file. |
-| `pipeline:StorageManager:LockCreationFailed` | **Fatal.** Thrown by the constructor if it fails to create the `.lock` file, likely due to file system permission issues. |
-| `pipeline:StorageManager:OverwriteAttempt` | **Fatal.** Thrown by the `persist` method if it is asked to save data to a hash that already exists in the L2 persistent (HDF5) cache. This enforces the immutability contract and signals a critical bug. |
-| `pipeline:StorageManager:DataNotInL1Cache` | **Fatal.** Thrown by the `persist` method if it is called for a hash that does not first exist in the L1 in-memory cache. This enforces the correct internal workflow. |
-| `pipeline:StorageManager:DataNotFound` | **Informational.** Thrown by the `load` method when a requested hash is not found in either the L1 or L2 cache. This is the expected "cache miss" signal for the Orchestrator. |
-| `pipeline:StorageManager:L2SaveError` | **Fatal.** Thrown by the `persist` method if a low-level error occurs during the HDF5 write operation (e.g., disk full, file corruption). |
-| `pipeline:StorageManager:L2LoadError` | **Fatal.** Thrown by the `load` method if a low-level error occurs during the HDF5 read operation (e.g., file corruption). |
-
-#### **Logs**
-
-Log messages provide visibility into the `StorageManager`'s internal operations.
-
-| Log ID | Level | Description & Trigger |
+| Identifier | Log Level | Description |
 | :--- | :--- | :--- |
-| `pipeline:StorageManager:LockAcquired` | `DEBUG` | Logged by the constructor upon successfully creating the `.lock` file. |
-| `pipeline:StorageManager:LockReleased` | `DEBUG` | Logged by the destructor upon successfully deleting the `.lock` file at the end of a run. |
-| `pipeline:StorageManager:L1CacheHit` | `DEBUG` | Logged by the `load` method when it successfully finds and returns data directly from the L1 in-memory cache. |
-| `pipeline:StorageManager:L2CacheHit` | `DEBUG` | Logged by the `load` method when it finds data in the L2 persistent cache. This message is logged *before* the data is promoted to L1. |
-| `pipeline:StorageManager:DataCachedToL1` | `DEBUG` | Logged by the `cache` method every time a new result is successfully added to the L1 in-memory cache. |
-| `pipeline:StorageManager:DataPersistedToL2`| `DEBUG` | Logged by the `persist` method upon successfully writing a data product from the L1 cache to the L2 persistent HDF5 file. |
-| `pipeline:StorageManager:LockCleanupWarning`| `WARN` | A warning logged by the destructor if it fails to delete the `.lock` file. This is not a fatal error but requires user attention. |
+| `pipeline:StorageManager:FileLocked` | `FATAL` | The `.lock` file for the target cache already exists, preventing a new pipeline instance from starting. |
+| `pipeline:StorageManager:LockCreationFailed`| `FATAL` | The framework failed to create the `.lock` file, likely due to file system permission issues. |
+| `pipeline:StorageManager:OverwriteAttempt` | `FATAL` | An attempt was made to save data to a hash that already exists in the L2 persistent cache, violating the immutability contract. |
+| `pipeline:StorageManager:DataNotInL1Cache` | `FATAL` | A call was made to persist data that did not first exist in the L1 in-memory cache, violating the internal workflow. |
+| `pipeline:StorageManager:L2SaveError` | `FATAL` | A low-level error occurred during an HDF5 write operation (e.g., disk full, file corruption). |
+| `pipeline:StorageManager:L2LoadError` | `FATAL` | A low-level error occurred during an HDF5 read operation (e.g., file corruption). |
+| `pipeline:StorageManager:DataNotFound` | `ERROR` | A requested hash was not found in either the L1 or L2 cache. This is the expected "cache miss" signal for the Orchestrator. |
+| `pipeline:StorageManager:LockCleanupWarning`| `WARN` | The destructor failed to delete the `.lock` file. This is not fatal but requires user attention. |
+| `pipeline:StorageManager:LockAcquired` | `DEBUG` | Logged upon successfully creating the `.lock` file. |
+| `pipeline:StorageManager:LockReleased` | `DEBUG` | Logged upon successfully deleting the `.lock` file at the end of a run. |
+| `pipeline:StorageManager:L1CacheHit` | `DEBUG` | Data was successfully found and returned directly from the L1 in-memory cache. |
+| `pipeline:StorageManager:L2CacheHit` | `DEBUG` | Data was found in the L2 persistent cache and is being promoted to L1. |
+| `pipeline:StorageManager:DataCachedToL1` | `DEBUG` | A new result was successfully added to the L1 in-memory cache. |
+| `pipeline:StorageManager:DataPersistedToL2`| `DEBUG` | Data was successfully written from the L1 cache to the L2 persistent HDF5 file. |
+
+---
+
+### Validator
+
+This taxonomy covers logs and errors generated during the initial validation of the `config` struct.
+
+| Identifier | Log Level | Description |
+| :--- | :--- | :--- |
+| `pipeline:Validator:MissingRequiredField` | `FATAL` | A required field (e.g., `config.stages`) is missing from the configuration. |
+| `pipeline:Validator:InvalidFieldType` | `FATAL` | A field has an incorrect data type (e.g., `stages` is not a struct). |
+| `pipeline:Validator:ParameterNameCollision` | `FATAL` | A parameter name is defined in both `globals` and `grid`. |
+| `pipeline:Validator:CircularDependency` | `FATAL` | The stage graph is not a valid DAG; a cycle was detected. |
+| `pipeline:Validator:InvalidDependencyTarget` | `FATAL` | An input recipe in a stage's `.inputs` field points to a stage or output that does not exist. |
+| `pipeline:Validator:UnexpectedField` | `WARN` | An unrecognized field was found in the `config` struct. The field will be ignored. |
+
+## Implementation Details
+
+### Logger Initialization Sequence
+
+To ensure that all framework actions, including configuration validation errors, are reliably captured, the logging system is initialized in a specific sequence within `pipeline.run()`. When contributing to this part of the codebase, it is crucial to adhere to this order:
+
+1. **Initialize with Defaults:** The very first action upon entering `pipeline.run` is to configure the `mlog` system with safe, hardcoded defaults (e.g., log to the console at `INFO` level). This guarantees that a logger is immediately available to report any subsequent errors.
+
+2. **Partial Validation of Logging Config:** The `Validator` is invoked to check *only* the `config.logging` struct. This isolated check ensures the user-provided logging settings are syntactically correct before they are applied.
+
+3. **Reconfigure Logger:** If the logging configuration is valid, the `mlog` system is immediately reconfigured using the user's settings from `config.logging`.
+
+4. **Full Configuration Validation:** The `Validator` is invoked again to validate the remainder of the `config` struct.
+
+This sequence ensures that if the user's logging configuration itself is invalid, the error is caught and reported by the default logger. All subsequent validation warnings and errors are then correctly routed to the user's specified destinations (e.g., a log file).
