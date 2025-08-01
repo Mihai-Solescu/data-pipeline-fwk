@@ -1,5 +1,5 @@
-classdef test_Hasher < matlab.unittest.TestCase
-    % test_Hasher Unit tests for the Hasher utility class
+classdef HasherTest < matlab.unittest.TestCase
+    % HasherTest Unit tests for the Hasher utility class
     % This test file validates the three core methods of the Hasher class:
     % hash_file, hash_data, and hash_struct according to TDD requirements.
     
@@ -121,7 +121,7 @@ classdef test_Hasher < matlab.unittest.TestCase
             
             % Assert that an error is thrown
             testCase.verifyError(@() pipeline.internal.Hasher.hash_file(nonexistentFile), ...
-                'Hasher:FileError', ...
+                'pipeline:Hasher:FileError', ...
                 'Should throw FileError for non-existent file');
         end
         
@@ -243,7 +243,7 @@ classdef test_Hasher < matlab.unittest.TestCase
             
             for i = 1:length(nonStructInputs)
                 testCase.verifyError(@() pipeline.internal.Hasher.hash_struct(nonStructInputs{i}), ...
-                    'Hasher:InputError', ...
+                    'pipeline:Hasher:InputError', ...
                     'Should throw InputError for non-struct input');
             end
         end
