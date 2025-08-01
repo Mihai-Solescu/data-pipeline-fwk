@@ -1,7 +1,7 @@
 # Architecture Design Document: General-Purpose Scientific Pipeline Framework
 
-**Version:** 0.26.1
-**Date:** 2025-07-31
+**Version:** 0.27.1
+**Date:** 2025-08-01
 
 ---
 
@@ -192,7 +192,7 @@ The ability to specify target stages for selective execution is a planned optimi
 
 ---
 
-## Algorithm Overview
+## 4. Algorithm Overview
 
 The full algorithm integrates configuration validation, progressive parametrization, and the iterative construction of a **Merkle DAG** to ensure efficiency and reproducibility.
 
@@ -229,11 +229,9 @@ This phase executes the main workflow by iteratively building the Merkle DAG of 
     * **C. Execute (if needed)**: If the hash is not found (a cache "miss"), the stage function is executed.
     * **D. Add Node to DAG**: The output data and its metadata are stored in the in-memory map under the new Provenance Hash. If required by the storage policy, the data is also written to the persistent store.
 
-## 4. Caching and Metadata
+## 5. Caching and Metadata
 
 The framework's caching system is designed to ensure both computational efficiency and the persistent storage of rich metadata for every task. All data and metadata are stored in a single HDF5 file, indexed by the **Provenance Hash** of each unique computational task.
-
----
 
 ### HDF5 Storage Architecture
 
@@ -245,9 +243,48 @@ The cache is organized around a "group-per-hash" model. Each unique **Provenance
 
 #### Example HDF5 Structure
 
----
+```text
+/ (HDF5 root)
+└── a1b2c3d4.../ (Group named with the Provenance Hash)
+    ├── U (Dataset - data payload, only exists if policy is 'persistent')
+    ├── S (Dataset - data payload, only exists if policy is 'persistent')
+    ├── V (Dataset - data payload, only exists if policy is 'persistent')
+    └── metadata (Appendable Dataset of JSON strings)
+        - '{"timestamp": "2025-08-01T11:40:00Z", "status": "SUCCESS", "duration_sec": 15.2}'
+        - '{"timestamp": "2025-08-01T11:41:10Z", "status": "SUCCESS", "duration_sec": 14.8}'
+```
 
-## 4. The Storage System
+### Telemetry and Cost Metrics
+
+After **every** execution of a task, whether it succeeds or fails, a new telemetry record is generated and stored. This is achieved by creating a MATLAB `struct` with all available information, serializing it to a JSON string, and appending it to the `metadata` dataset.
+
+This "self-describing record" approach is highly resilient to changes, as new fields can be added in the future without invalidating older records. Standard telemetry fields include:
+
+* `timestamp`
+* `status` ('SUCCESS' or 'FAILURE')
+* `duration_sec`
+* `memory_usage_MB`
+* `error_message` (if applicable)
+
+### Multi-Level Cache Resolution
+
+When the orchestrator needs to resolve a dependency, it checks the cache and identifies one of three states:
+
+1. **Full Miss ❌**: The group corresponding to the `Provenance Hash` does not exist.
+    * **Meaning**: This computation has never been run.
+    * **Action**: Execute the stage function. Upon completion, create the group, append the new metadata record, and save the data outputs if their storage policy is `'persistent'`.
+
+2. **Metadata Hit ℹ️**: The group exists, but the required output dataset is **not** present within it (because its policy was `memory_only` on a previous run).
+    * **Meaning**: The computation was run before, and its historical metrics are available, but the data payload is not.
+    * **Action**: This is treated as a **data miss**. The stage function is re-executed to regenerate the data. A new metadata record for this latest run is appended to the history.
+
+3. **Data Hit ✅**: The group exists, **and** the required output dataset is present.
+    * **Meaning**: The computation has been run and its results were persisted.
+    * **Action**: Load the data directly from the dataset and skip execution entirely.
+
+> **Note:** Remember to reconcile this with the storage system: Replace the `flag = exists(key)` method in the IStorageBackend with `status = check(key, required_outputs)` and modify `write(key, outputs, metadata, storage_policies)`.
+
+## 6. The Storage System
 
 The storage system is designed as a **two-tier architecture** to provide both high performance via in-memory caching and data integrity via persistent on-disk storage. The architecture strictly separates the caching logic from the persistence mechanism, allowing different storage backends to be used in the future without altering the core pipeline engine.
 
@@ -468,43 +505,7 @@ The framework's parallel execution model is safe only if the user-provided code 
 
 ## 4. Source Code and Project Structure
 
-The project root directory is laid out as follows:
-
-```text
-data-pipeline-framework/
-│
-├── +pipeline/
-│   │
-│   ├── +internal/
-│   │   ├── Orchestrator.m
-│   │   ├── Resolver.m
-│   │   ├── StorageManager.m
-│   │   ├── Hasher.m
-│   │   ├── DependencyGraph.m
-│   │   └── Job.m
-│   │
-│   ├── get.m
-│   ├── run.m
-│   ├── gc.m
-│   └── Recipe.m
-│
-├── docs/
-│   ├── adr/
-│   │   └── ... (Architectural Decision Records)
-│   ├── ADD.md
-│   └── SRS.md
-│
-├── examples/
-│   └── ... (Self-contained example projects)
-│
-└── tests/
-    └── ... (Unit and integration tests)
-```
-
-### Component Roles
-
 * **`+pipeline/`**: The main package folder containing the public API (`run`, `get`, `gc`).
-* **`+pipeline/+internal/`**: A nested subpackage for all private core engine components.
 * **`docs/`**: Contains all project documentation.
 * **`examples/`**: Contains self-contained example projects.
 * **`tests/`**: Contains all unit and integration tests.
