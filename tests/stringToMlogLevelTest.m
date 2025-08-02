@@ -1,5 +1,5 @@
-classdef test_stringToMlogLevel < matlab.unittest.TestCase
-    % test_stringToMlogLevel Unit tests for the stringToMlogLevel utility function
+classdef stringToMlogLevelTest < matlab.unittest.TestCase
+    % stringToMlogLevelTest Unit tests for the stringToMlogLevel utility function
     % This test file validates the conversion of string representations to
     % mlog.Level enumerations for all valid levels and error handling for
     % invalid inputs.
