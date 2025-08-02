@@ -41,12 +41,11 @@ function run(config)
         end
         
         % Step 5: Build the stage graph
-        % builder = pipeline.utility.StageGraphBuilder(config);
-        % stageGraph = builder.build();
+        stage_graph = pipeline.utility.StageGraph(config.stages, logger);
+        stage_graph.plot(); % Visually validate the stage graph structure
         
         % Step 6: Log successful initialization
         logger.info('pipeline:run:InitializationComplete: Pipeline initialization completed successfully.');
-        % Note: Actual stage graph building will be implemented later
 
     catch ME
         logger.fatal('pipeline:run:InitializationFailed: Pipeline initialization failed: %s', ME.message);
