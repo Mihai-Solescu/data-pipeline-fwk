@@ -1,7 +1,7 @@
 # Architecture Design Document: General-Purpose Scientific Pipeline Framework
 
-**Version:** 0.28.1
-**Date:** 2025-08-01
+**Version:** 0.28.2
+**Date:** 2025-08-02
 
 ---
 
@@ -32,19 +32,26 @@ The framework intentionally uses a single, global filter that is applied **upfro
 
 The `config.stages` struct defines the computational graph. Each **field** in the `config.stages` struct defines a single computational stage, where the **field name itself serves as the unique identifier** for the stage. The value of each field is a struct containing the stage's specific configuration:
 
-* **.function**: A function handle to the stateless component that performs the computation.
-* **.inputs**: A struct mapping local input names for the function to their **Dependency Recipes** (e.g., `struct('data_in', 'previous_stage.output_name')`). This defines the stage's connections within the DAG.
-* **.params**: A cell array of strings listing all parameter names the stage depends on, whether global or from the grid. This is crucial for granular hashing.
-* **.outputs**: A cell array of structs, where each struct defines an output's `.name` and its `.storage_policy`.
-* **.execution_mode** (string, optional): Controls the stage's execution scope. It defaults to `'per_run'`.
+* **`.function`**: A function handle to the stateless component that performs the computation.
+* **`.inputs`** (struct, optional): A struct mapping local input names for the function to their **Dependency Recipes** (e.g., `struct('data_in', 'previous_stage.output_name')`). This defines the stage's connections within the DAG. If this field is missing, the stage is considered to have no inputs.
+* **`.params`** (cell array of strings, optional): A cell array of strings listing all parameter names the stage depends on, whether global or from the grid. This is crucial for granular hashing. If this field is missing, the stage is considered to have only the inherited parameter dependencies, implicitely, and no used ones. This means that at runtime the params struct passed to the function will be empty, even though the inputs that will be passed in will be those with specific values for their inherited parameters, and thus the output will be dependent on the same parameter values.
+* **`.outputs`** (cell array of structs, optional): A cell array of structs, where each struct defines an output's `.name` and its `.storage_policy`. If this field is missing, the stage is considered to have no outputs.
+* **`.execution_mode`** (string, optional): Controls the stage's execution scope. It defaults to `'per_run'`.
   * `'per_run'`: The stage runs once for each valid parameter combination from the grid.
   * `'global'`: The stage runs only once. If it has inputs, it acts as a synchronization barrier. If it has no inputs, it acts as a setup stage.
 * The **`.storage_policy`** field for an output supports three options:
-  * `'persistent'`: (Default) The output is always saved to the persistent HDF5 store.
+  * `'persistent'`: (Default) The output is always saved to the persistent HDF5 store. If the `.storage_policy` field is omitted for an output, this is the default behavior.
   * `'memory_only'`: The output is only kept in memory for the duration of the pipeline run.
   * **Function Handle**: A function handle with the signature `f(p, G)` for defining conditional storage rules. `p` is the current run's parameter struct, and `G` is the global grid metadata struct. If the function returns `true`, the output is persisted; if `false`, it is memory-only for that run.
 
-> **Note:** The implementation of advanced features—specifically the **conditional storage policy** and the full input resolver API—will be deferred to a later development stage. These features are modular, non-breaking extensions to the core architecture. The initial release will focus on stabilizing the fundamental caching and dependency-tracking logic, which uses provenance hashing and simple string-based dependency recipes. For details on the planned resolver system, see [The Dependency Recipe and Resolution System](#5-the-dependency-recipe-and-resolution-system).
+> **Note:** The implementation of advanced features—specifically the **conditional storage policy** and the full input resolver API—will be deferred to a later development stage. These features are modular, non-breaking extensions to the core architecture. The initial release will focus on stabilizing the fundamental caching and dependency-tracking logic, which uses provenance hashing and simple string-based dependency recipes. For details on the planned resolver system, see [The Dependency Recipe and Resolution System](#8-the-dependency-recipe-and-resolution-system).
+
+#### Hashing and Function Constraints
+
+The provenance hashing mechanism relies on being able to locate the source file for a component function.
+
+* **Constraint:** All component functions referenced by a function handle in the configuration **must be defined in their own `.m` files** and be located on the MATLAB path.
+* **Validation:** The configuration validation routine must verify this for every stage by checking that `which(func2str(handle))` returns a valid file path. It will fail immediately if a handle is to an anonymous, nested, or otherwise unlocatable function.
 
 ### 1.3. Output Storage Location
 
@@ -64,13 +71,39 @@ The `config` struct also contains fields for controlling execution behavior:
 
 * **`config.num_workers`**: An integer specifying the number of parallel workers for executing jobs. If set to `1`, execution is serial. If greater than `1`, a parallel pool of the specified size is used. If omitted or set to `'auto'`, the framework uses the default parallel pool size determined by MATLAB.
 
----
+### 1.6. The `StageGraph` and Parameter Dependencies
 
-## 2. Function Signatures
+The `StageGraph` class is not just a passive representation of the pipeline's structure; it's an intelligent model of the data and parameter flow. Its responsibilities extend beyond simple validation to include the resolution of implicit parameter dependencies, ensuring the framework's execution engine receives a complete and accurate picture of each task's provenance.
+
+#### The `StageGraph`'s Core Responsibility
+
+The `StageGraph` object’s primary purpose is to provide a comprehensive and immutable model of the pipeline's computational graph. It ensures the graph's structural integrity and resolves all parameters that influence each stage, whether they are explicitly declared by the user or implicitly inherited through dependencies.
+
+Specifically, the `StageGraph` constructor performs a crucial preprocessing step: for every stage, it computes a complete list of its *implicit parameters* by combining the parameters explicitly listed in a stage's `.params` field with all parameters from all of its upstream dependencies.
+
+#### The Algorithm for Implicit Dependency Resolution
+
+The `StageGraph` constructor performs a traversal of the graph to build a complete list of implicit parameters for each stage. The algorithm works as follows:
+
+1. **Initialize:** For each stage, a list of its implicit parameters is initialized to contain the union of all parameters explicitly declared in the stage's `.params` field.
+
+2. **Iterate and Aggregate:** The algorithm iterates through the stages in a reverse topological sort order (from outputs to inputs). For each stage:
+    * It retrieves the implicit parameters of all its direct successors (stages that depend on it).
+    * It adds these parameters to the implicit parameter list of the current stage.
+
+This process ensures that by the time the algorithm reaches a given stage, all parameters from its entire downstream subtree have been propagated back and aggregated. The result is an immutable property in the `StageGraph` class called `implicit_params`, which is a map where each key is a stage name and each value is a cell array of all parameter names—both explicit and implicit—that influence that stage's computation.
+
+#### Intended Use
+
+This pre-computed `implicit_params` map is intended to be used by the framework's scheduling and hashing components. When generating the unique tasks for a stage, this map ensures that the correct parameter space is considered, capturing all upstream dependencies. Similarly, when computing the `Provenance Hash`, this map is used to ensure that the hash is derived from the complete set of influencing parameters, guaranteeing that any change to an upstream parameter will correctly invalidate the cache for all affected downstream stages.
+
+However, the framework will still honor the user's explicit `.params` list when executing the stage function itself, passing only those declared parameters to maintain a clean and decoupled interface for the scientific components.
+
+## 1.7. Function Signatures
 
 The framework interacts with user-provided code through three distinct types of function handles, each with a specific signature tailored to its purpose.
 
-### 2.1. Stage Computation Function
+### 1.7.1. Stage Computation Function
 
 This is the primary function that performs the scientific calculation for a stage. Its signature is designed to be clean and decoupled from the overall framework configuration.
 
@@ -81,7 +114,14 @@ This is the primary function that performs the scientific calculation for a stag
 * **Return Value:**
   * `outputs`: A struct where each **field name must exactly match** an output name defined in the stage's `.outputs` configuration. The framework uses these names to map the returned data to the correct outputs, so the order of fields in the struct does not matter.
 
-### 2.2. Parameter Filter Function
+#### User Contract for Parallel Safety
+
+The framework's parallel execution model is safe only if the user-provided code adheres to certain constraints.
+
+* **Constraint:** All component functions **must be `parfor`-compliant**. This is a strict requirement.
+* **User Responsibility:** The user is responsible for ensuring their code is free of side effects, such as accessing global variables, modifying variables in parent workspaces, or performing unsafe file I/O. The framework cannot programmatically enforce perfect function purity. This will be explicitly stated in the user documentation.
+
+### 1.7.2. Parameter Filter Function
 
 This function is used to selectively discard runs from the generated parameter grid before execution begins. Its signature provides the context of the single run relative to the entire experimental space.
 
@@ -91,7 +131,7 @@ This function is used to selectively discard runs from the generated parameter g
   * `G`: The complete **global grid** struct (`config.params.grid`), passed by value. This allows for powerful relative logic by giving the function access to the full range of all tested parameter values (e.g., `max(G.rank)`).
 * **Return Value:** Must return `true` to keep the run or `false` to discard it.
 
-### 2.3. Conditional Storage Policy Function
+### 1.7.3. Conditional Storage Policy Function
 
 This function is used to define complex rules for whether a stage's output should be saved to the persistent HDF5 store. Its signature is identical to the parameter filter's, providing full context for the decision.
 
@@ -103,13 +143,13 @@ This function is used to define complex rules for whether a stage's output shoul
 
 ---
 
-## 3. Hashing (ADR-012)
+## 2. Hashing (ADR-012)
 
 The framework's guarantee of reproducibility and computational efficiency is built upon a **Provenance-Based Hashing** system. Instead of hashing the *output* of a computation, the framework generates a unique and deterministic fingerprint for the computation's complete origin, or **provenance**. This allows the expected hash to be calculated *before* a stage is executed, enabling efficient cache lookups.
 
 This fingerprint is called the **Provenance Hash**.
 
-### 3.1. The Three Components of the Provenance Hash
+### 2.1. The Three Components of the Provenance Hash
 
 The Provenance Hash is an SHA-256 hash derived from three and only three sources. It is the single, consistent formula used for all data products in the system.
 
@@ -117,7 +157,7 @@ The Provenance Hash is an SHA-256 hash derived from three and only three sources
 2. **Input Hashes**: An SHA-256 hash derived from a deterministically sorted list of the Provenance Hashes of all direct data inputs. For stages with multiple inputs (e.g., fan-in nodes), the list of input hashes is sorted alphabetically before being hashed to ensure the result is deterministic and independent of execution order.
 3. **Granular Parameter Hash**: An SHA-256 hash of a canonical representation of a struct containing the specific parameters the stage depends on. The struct's **field names** are the parameter names, and the **field values** are their specific values for the task. To ensure determinism, the fields of this struct are sorted alphabetically by name before being serialized and hashed.
 
-### 3.2. The Parameter Contract
+### 2.2. The Parameter Contract
 
 The construction of the **Granular Parameter Hash** is governed by a strict contract between the user's configuration and the framework's executor to ensure precision and prevent unnecessary recomputations.
 
@@ -127,7 +167,7 @@ The construction of the **Granular Parameter Hash** is governed by a strict cont
 
 If a parameter is declared in `.params` but is not found in the function's code, the framework should proceed with the computation but print a clear warning to the console (e.g. `WARNING in stage 'compute_svd': Parameter 'dt' is declared in '.params' but does not appear to be used in the function 'compute_svd.m'. Including it may cause unnecessary recomputations if its value changes.`).
 
-### 3.3. Cascading Invalidation and Efficiency
+### 2.3. Cascading Invalidation and Efficiency
 
 This hashing design creates a "keychain" of cryptographic dependency.
 
@@ -140,7 +180,7 @@ This mechanism ensures that the absolute minimum number of computations is perfo
 
 The full algorithm integrates configuration validation, progressive parametrization, and provenance-based hashing into a coherent workflow. The process is divided into two main phases: a one-time setup and the main execution loop.
 
-### 3.4. Scenarios
+### 2.4. Scenarios
 
 Here are a few scenarios that illustrate the desired outcomes of the provenance hashing system.
 
@@ -185,7 +225,7 @@ This highlights the power of progressive parametrization.
     2. For the `compute_svd` stage and all its dependents, the tasks corresponding to `rank=10` and `rank=15` are `CACHED`.
     3. The framework **only executes the new tasks** corresponding to `rank=20`. This saves the maximum amount of time by only computing what is truly new.
 
-### 3.5. Hashing as a Merkle DAG
+### 2.5. Hashing as a Merkle DAG
 
 The provenance hashing system can be formally understood as the construction of a **Merkle DAG** (Directed Acyclic Graph). In this model, every unique data product in the framework is a node in the graph, and its **Provenance Hash serves as its unique identifier**.
 
@@ -196,13 +236,13 @@ A key property of a Merkle DAG is that the identifier for any node is a cryptogr
 
 This model is not a different implementation, but rather the formal computer science pattern that describes our hashing strategy. It guarantees data integrity and provides a verifiable, tamper-proof audit trail for every result. Crucially, the Merkle DAG is built **iteratively** by processing stages in topological order (from inputs to outputs). This avoids any expensive runtime recursion, as the hash for any parent node is always computed and cached before it is needed by a child node.
 
-### 3.6. Targeting stages
+### 2.6. Targeting stages
 
 The ability to specify target stages for selective execution is a planned optimization for a future release. This feature will allow users to run only the minimal subgraph of dependencies required to produce a desired output, which is ideal for debugging or regenerating specific results. Its implementation will be deferred to allow for the initial focus to remain on stabilizing the core framework's ability to robustly execute and cache the entire defined pipeline. This functionality can be cleanly integrated later by adding a reverse-dependency graph traversal step that prunes the execution plan before the main orchestrator begins its work.
 
 ---
 
-## 4. Algorithm Overview
+## 3. Algorithm Overview
 
 The full algorithm integrates configuration validation, progressive parametrization, and the iterative construction of a **Merkle DAG** to ensure efficiency and reproducibility.
 
@@ -239,32 +279,61 @@ This phase executes the main workflow by iteratively building the Merkle DAG of 
     * **C. Execute (if needed)**: If the hash is not found (a cache "miss"), the stage function is executed.
     * **D. Add Node to DAG**: The output data and its metadata are stored in the in-memory map under the new Provenance Hash. If required by the storage policy, the data is also written to the persistent store.
 
-## 5. Caching and Metadata
+## 4. Caching and Metadata
 
 The framework's caching system is designed to ensure both computational efficiency and the persistent storage of rich metadata for every task. All data and metadata are stored in a single HDF5 file, indexed by the **Provenance Hash** of each unique computational task.
 
-### 5.1. HDF5 Storage Architecture
+### 4.1. HDF5 Storage Architecture
 
 The cache is organized around a "group-per-hash" model. Each unique **Provenance Hash** corresponds to a single **group** within the HDF5 file, which acts as a container for everything related to that specific computation.
 
-* **Data Outputs**: Primary data products (e.g., matrices, vectors) are stored as individual **datasets** within the group, named according to the `.outputs` configuration. The existence of these datasets depends on the `storage_policy`.
+* **Data Outputs**: Primary data products are stored as individual **datasets**.
+* **Task Metadata**: A single, static dataset named `provenance` will be created within each hash group. This dataset will store a JSON string containing all the information required to reconstruct the task's identity and its position in the dependency graph, including its full input provenance.
+* **Run Telemetry**: All historical metrics and telemetry for every execution of the task are stored within a separate, appendable **dataset of JSON strings** named `telemetry`.
 
-* **Telemetry**: All historical metadata and telemetry for every execution of the task are stored within a single, appendable **dataset of JSON strings**.
+### 4.2. HDF5 Structure for a Cached Task
 
-#### Example HDF5 Structure
+This updated structure clearly separates the static, task-defining metadata from the dynamic, run-specific telemetry.
 
 ```text
 / (HDF5 root)
 └── a1b2c3d4.../ (Group named with the Provenance Hash)
-    ├── U (Dataset - data payload, only exists if policy is 'persistent')
-    ├── S (Dataset - data payload, only exists if policy is 'persistent')
-    ├── V (Dataset - data payload, only exists if policy is 'persistent')
-    └── metadata (Appendable Dataset of JSON strings)
-        - '{"timestamp": "2025-08-01T11:40:00Z", "status": "SUCCESS", "duration_sec": 15.2}'
-        - '{"timestamp": "2025-08-01T11:41:10Z", "status": "SUCCESS", "duration_sec": 14.8}'
+    ├── U (Dataset - data payload)
+    ├── S (Dataset - data payload)
+    ├── V (Dataset - data payload)
+    ├── provenance (Dataset - single JSON string)
+    └── telemetry (Appendable Dataset of JSON strings)
 ```
 
-### 5.2. Telemetry and Cost Metrics
+### 4.3. Task Metadata Content
+
+The `provenance` dataset will contain a single JSON string with the following structure:
+
+```json
+{
+  "stage_name": "compute_svd",
+  "code_hash": "...",
+  "parameter_hash": "...",
+  "inputs": {
+    "local_input_name_1": "hash_of_upstream_output_1",
+    "local_input_name_2": "hash_of_upstream_output_2"
+  }
+}
+```
+
+This design ensures that the static provenance information, which is a component of the hash itself, is stored once and is immutable. The run-specific metrics are stored in a separate, appendable dataset. This is a more robust and conceptually correct approach.
+
+> **Note**: This implementation is a pragmatic design choice for the initial release. A truly cryptographic reverse-link would require a more complex hashing algorithm that is aware of downstream dependencies. This more robust approach is being considered for a future release. For details, see [Future Considerations: Cryptographic Reverse-Linking](#future-considerations-cryptographic-reverse-linking).
+
+#### Future Considerations: Cryptographic Reverse-Linking
+
+The current implementation uses a pragmatic approach for reverse-traversal by explicitly storing the hashes of a task's parents in its metadata. While this is efficient and sufficient for the initial release, it is not cryptographically verifiable.
+
+A more robust and tamper-proof solution would involve modifying the core hashing algorithm to incorporate a cryptographic link to downstream consumers. This would require a significant architectural change to move beyond a simple Merkle DAG.
+
+The proposed approach is to embed a hash of the "downstream recipe" into the upstream node's hash calculation. This would ensure that any change to a consuming stage's dependency recipe would invalidate the upstream producer's hash, providing a tamper-proof chain of provenance in both directions. This advanced hashing model is deferred to a later release to focus on stabilizing the core forward-only execution engine.
+
+### 4.4. Telemetry and Cost Metrics
 
 After **every** execution of a task, whether it succeeds or fails, a new telemetry record is generated and stored. This is achieved by creating a MATLAB `struct` with all available information, serializing it to a JSON string, and appending it to the `metadata` dataset.
 
@@ -276,7 +345,7 @@ This "self-describing record" approach is highly resilient to changes, as new fi
 * `memory_usage_MB`
 * `error_message` (if applicable)
 
-### 5.3. Multi-Level Cache Resolution
+### 4.5. Multi-Level Cache Resolution
 
 When the orchestrator needs to resolve a dependency, it checks the cache and identifies one of three states:
 
@@ -294,11 +363,11 @@ When the orchestrator needs to resolve a dependency, it checks the cache and ide
 
 > **Note:** Remember to reconcile this with the storage system: Replace the `flag = exists(key)` method in the IStorageBackend with `status = check(key, required_outputs)` and modify `write(key, outputs, metadata, storage_policies)`.
 
-## 6. The Storage System
+## 5. The Storage System
 
 The storage system is designed as a **two-tier architecture** to provide both high performance via in-memory caching and data integrity via persistent on-disk storage. The architecture strictly separates the caching logic from the persistence mechanism, allowing different storage backends to be used in the future without altering the core pipeline engine.
 
-### 6.1. Storage System Diagram
+### 5.1. Storage System Diagram
 
 The following diagram illustrates the main components and relationships in the storage subsystem:
 
@@ -312,7 +381,7 @@ The following is the old storage diagram:
 !include diagrams/storage_old.puml
 ```
 
-### 6.2. Architectural Overview
+### 5.2. Architectural Overview
 
 The system is composed of three primary abstractions:
 
@@ -324,7 +393,7 @@ The system is composed of three primary abstractions:
 
 The `Executor` communicates only with the `StorageManager`, which delegates commands to the appropriate L1 or L2 backend.
 
-### 6.3. The StorageManager API and Logic
+### 5.3. The StorageManager API and Logic
 
 The `StorageManager` is instantiated at the start of a run with two configured `IStorageBackend` instances (one for L1, one for L2).
 
@@ -339,7 +408,7 @@ The `StorageManager` is instantiated at the start of a run with two configured `
     1. It calls `read(hash)` on the **L1 backend** to get the data.
     2. It then calls `write(hash, data)` on the **L2 backend**.
 
-### 6.4. The IStorageBackend Interface
+### 5.4. The IStorageBackend Interface
 
 This defines a strict contract for **any** storage technology—whether in-memory or on-disk—to be compliant with the framework.
 
@@ -349,7 +418,7 @@ This defines a strict contract for **any** storage technology—whether in-memor
   * `flag = exists(key)`: Returns `true` if the key exists.
   * `delete(key)`: Removes a key and its associated data.
 
-### 6.5. Concurrency and Scalability
+### 5.5. Concurrency and Scalability
 
 To support parallel execution, the storage system must be thread-safe. This is achieved without modifying the core storage backends by using the **Decorator Pattern**, which allows for adding new behaviors (like locking) to existing objects dynamically.
 
@@ -369,7 +438,7 @@ For very high I/O workloads, a single persistent file can become a bottleneck. *
 !include diagrams/storage_sharding.puml
 ```
 
-### 6.6. Garbage Collection
+### 5.6. Garbage Collection
 
 The garbage collection utility operates directly on the **L2 `IStorageBackend` instance** held by the `StorageManager`.
 
@@ -380,11 +449,11 @@ The garbage collection utility operates directly on the **L2 `IStorageBackend` i
 
 ---
 
-## 7. The Logging System
+## 6. The Logging System
 
 To provide clear, contextual feedback to the user and aid in debugging, the framework implements a robust logging system built on the `mathworks/advanced-logger`. This system is designed for flexibility, centralized control, and graceful error handling.
 
-### 7.1. Logger Implementation Strategy
+### 6.1. Logger Implementation Strategy
 
 The framework will use `mathworks/advanced-logger` directly, leveraging its **named singleton pattern** rather than passing logger objects through dependency injection. This approach simplifies component constructors and reduces "plumbing" overhead while retaining all the benefits of centralized configuration.
 
@@ -392,7 +461,7 @@ The framework will use `mathworks/advanced-logger` directly, leveraging its **na
 * **Named Singletons:** Each internal component will obtain its specific logger instance by calling `mlog.Logger('ComponentName')` directly. A hierarchical naming convention (e.g., `pipeline:orchestrator`, `pipeline:storage:manager`) will be used to provide clear context in log outputs.
 * **No Internal Configuration:** Components will not configure their own logger instances. They will rely on the central configuration established by `pipeline.run()`.
 
-### 7.2. Dual-Output and Verbosity
+### 6.2. Dual-Output and Verbosity
 
 The logging system is capable of writing to two destinations simultaneously, with independent verbosity levels.
 
@@ -405,7 +474,7 @@ The logging system is capable of writing to two destinations simultaneously, wit
   * `mlog.Level.FATAL`: Reserved for unrecoverable errors that force a pipeline shutdown.
   * `mlog.Level.OFF`: Suppresses all output.
 
-### 7.3. Robust Error Logging and Handling
+### 6.3. Robust Error Logging and Handling
 
 The framework prioritizes logging all errors before handling them, ensuring critical information is never lost. This approach is fundamental to enabling the `config.error_mode` functionality.
 
@@ -500,13 +569,6 @@ To prevent cache corruption from concurrent pipeline runs on the same file, the 
 * **Mechanism:** Upon starting a run, the framework will create a `.lock` file next to the HDF5 cache. If this file already exists, the framework will refuse to start and will throw an error.
 * **Cleanup:** The `.lock` file must be reliably deleted upon successful completion or in a `try/catch/finally` block to handle termination due to an error.
 
-### 3.2. Hashing and Function Constraints
-
-The provenance hashing mechanism relies on being able to locate the source file for a component function.
-
-* **Constraint:** All component functions referenced by a function handle in the configuration **must be defined in their own `.m` files** and be located on the MATLAB path.
-* **Validation:** The configuration validation routine must verify this for every stage by checking that `which(func2str(handle))` returns a valid file path. It will fail immediately if a handle is to an anonymous, nested, or otherwise unlocatable function.
-
 ### 3.3. Data Serialization Strategy
 
 The HDF5 file format has limitations regarding complex MATLAB data types.
@@ -527,13 +589,6 @@ The current architecture prioritizes performance by holding the job registry and
 
 * **Known Trade-off:** This design is optimized for workflows whose state and temporary data can fit within a single machine's available RAM.
 * **Future Scope:** For extremely large-scale workflows, future versions could explore optimizations like spilling the job registry to disk or implementing a more sophisticated L1 cache eviction policy. These are out of scope for the initial implementation.
-
-### 3.6. User Contract for Parallel Safety
-
-The framework's parallel execution model is safe only if the user-provided code adheres to certain constraints.
-
-* **Constraint:** All component functions **must be `parfor`-compliant**. This is a strict requirement.
-* **User Responsibility:** The user is responsible for ensuring their code is free of side effects, such as accessing `global` variables, modifying variables in parent workspaces, or performing unsafe file I/O. The framework cannot programmatically enforce perfect function purity. This will be explicitly stated in the user documentation.
 
 ---
 
