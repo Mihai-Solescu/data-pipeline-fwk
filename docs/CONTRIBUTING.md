@@ -48,26 +48,60 @@ All custom error and log identifiers thrown or logged by the framework must foll
 * **`<ComponentName>`:** The CamelCase name of the internal component where the error or log originates (e.g., `StorageManager`, `Resolver`).
 * **`<Identifier>`:** A concise, CamelCase name for the specific error or log event (e.g., `OverwriteAttempt`, `JobComplete`).
 
-### StorageManager
+I've updated and expanded the taxonomy to cover the entire storage system, assigning logs and errors to the specific component responsible for them.
 
-This taxonomy details all defined log messages originating from the `pipeline:StorageManager` component.
+---
+
+### Storage System Log and Error Taxonomy
+
+This taxonomy is divided by component to clarify where each message originates.
+
+#### `HDF5Backend` (L2 Persistent Store)
+
+These logs relate to the direct management of the on-disk HDF5 file and its associated lock file.
 
 | Identifier | Log Level | Description |
 | :--- | :--- | :--- |
-| `pipeline:StorageManager:FileLocked` | `FATAL` | The `.lock` file for the target cache already exists, preventing a new pipeline instance from starting. |
-| `pipeline:StorageManager:LockCreationFailed`| `FATAL` | The framework failed to create the `.lock` file, likely due to file system permission issues. |
-| `pipeline:StorageManager:OverwriteAttempt` | `FATAL` | An attempt was made to save data to a hash that already exists in the L2 persistent cache, violating the immutability contract. |
-| `pipeline:StorageManager:DataNotInL1Cache` | `FATAL` | A call was made to persist data that did not first exist in the L1 in-memory cache, violating the internal workflow. |
-| `pipeline:StorageManager:L2SaveError` | `FATAL` | A low-level error occurred during an HDF5 write operation (e.g., disk full, file corruption). |
-| `pipeline:StorageManager:L2LoadError` | `FATAL` | A low-level error occurred during an HDF5 read operation (e.g., file corruption). |
-| `pipeline:StorageManager:DataNotFound` | `ERROR` | A requested hash was not found in either the L1 or L2 cache. This is the expected "cache miss" signal for the Orchestrator. |
-| `pipeline:StorageManager:LockCleanupWarning`| `WARN` | The destructor failed to delete the `.lock` file. This is not fatal but requires user attention. |
-| `pipeline:StorageManager:LockAcquired` | `DEBUG` | Logged upon successfully creating the `.lock` file. |
-| `pipeline:StorageManager:LockReleased` | `DEBUG` | Logged upon successfully deleting the `.lock` file at the end of a run. |
+| `pipeline:HDF5Backend:FileLocked` | `FATAL` | The `.lock` file for the target cache already exists, preventing a new pipeline instance from starting. |
+| `pipeline:HDF5Backend:LockCreationFailed`| `FATAL` | The framework failed to create the `.lock` file, likely due to file system permission issues. |
+| `pipeline:HDF5Backend:WriteError` | `ERROR` | A low-level error occurred during an HDF5 write operation (e.g., disk full, file corruption). |
+| `pipeline:HDF5Backend:ReadError` | `ERROR` | A low-level error occurred during an HDF5 read operation (e.g., file corruption, dataset not found). |
+| `pipeline:HDF5Backend:OverwriteAttempt` | `ERROR` | An attempt was made to write to a key that already exists, which violates the immutability contract. |
+| `pipeline:HDF5Backend:LockCleanupFailed`| `WARN` | The destructor failed to delete the `.lock` file. This is not fatal but requires user attention to prevent future runs from failing. |
+| `pipeline:HDF5Backend:LockAcquired` | `DEBUG` | Logged upon successfully creating the `.lock` file for the HDF5 store. |
+| `pipeline:HDF5Backend:LockReleased` | `DEBUG` | Logged upon successfully deleting the `.lock` file at the end of a run. |
+
+#### `InMemoryBackend` (L1 In-Memory Store)
+
+This component is a simple wrapper around `containers.Map` and has minimal specific logging.
+
+| Identifier | Log Level | Description |
+| :--- | :--- | :--- |
+| `pipeline:InMemoryBackend:CacheCleared` | `INFO` | The in-memory cache has been cleared, for example, at the end of a pipeline run. |
+
+#### `StorageManager` (The Orchestrator)
+
+These logs describe the flow of data between the L1 and L2 caches.
+
+| Identifier | Log Level | Description |
+| :--- | :--- | :--- |
+| `pipeline:StorageManager:DataNotFound` | `ERROR` | A requested key was not found in the L1 in-memory cache **or** the L2 persistent store. This is the official "cache miss" signal. |
+| `pipeline:StorageManager:PersistRequestFailed`|`ERROR` | A request was made to persist data from L1 to L2, but the key did not exist in the L1 cache. This indicates a logic error. |
+| `pipeline:StorageManager:L2CacheHit` | `INFO` | Data was not found in the L1 cache but was successfully retrieved from the L2 persistent store. |
+| `pipeline:StorageManager:DataPromotedToL1` | `DEBUG` | Data retrieved from the L2 store was successfully written to the L1 cache for faster access. |
 | `pipeline:StorageManager:L1CacheHit` | `DEBUG` | Data was successfully found and returned directly from the L1 in-memory cache. |
-| `pipeline:StorageManager:L2CacheHit` | `DEBUG` | Data was found in the L2 persistent cache and is being promoted to L1. |
-| `pipeline:StorageManager:DataCachedToL1` | `DEBUG` | A new result was successfully added to the L1 in-memory cache. |
-| `pipeline:StorageManager:DataPersistedToL2`| `DEBUG` | Data was successfully written from the L1 cache to the L2 persistent HDF5 file. |
+| `pipeline:StorageManager:DataCachedToL1` | `DEBUG` | A new result (from the `Executor`) was successfully written to the L1 in-memory cache. |
+| `pipeline:StorageManager:DataPersistedToL2`| `DEBUG` | Data was successfully written from the L1 cache to the L2 persistent store. |
+
+#### `ConcurrentStorageDecorator`
+
+These logs are specific to the thread-safety wrapper and are crucial for debugging parallel execution.
+
+| Identifier | Log Level | Description |
+| :--- | :--- | :--- |
+| `pipeline:ConcurrentStorageDecorator:LockWait`|`DEBUG`| A thread is waiting to acquire a lock held by another thread, indicating contention. |
+| `pipeline:ConcurrentStorageDecorator:LockAcquired`|`DEBUG`| A thread successfully acquired the in-process lock to perform a storage operation. |
+| `pipeline:ConcurrentStorageDecorator:LockReleased`|`DEBUG`| A thread successfully released the in-process lock after a storage operation. |
 
 ---
 
