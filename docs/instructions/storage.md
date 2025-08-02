@@ -1,117 +1,104 @@
-# Storage Component Implementation Instructions
+# Implementation and Testing Strategy for the Storage System
 
-This document provides detailed guidance for implementing the storage subsystem of the pipeline framework. Follow the architectural design in the ADD and use strict test-driven development (TDD) practices. All code must be accompanied by comprehensive, class-based unit tests.
-
-## 1. Overview
-
-The storage subsystem consists of:
-
-- `StorageManager`: Handles L1 (in-memory) cache and delegates to L2 (persistent) backend.
-- `StorageBackend` (interface): Abstracts persistent storage operations.
-- `HDF5Backend`: Implements `StorageBackend` for HDF5 files.
-- Storage policies and error handling.
-
-**File Organization:**
-All storage component files should be placed under the `+pipeline/+storage/` directory for modularity and clarity:
-
-- `+pipeline/+storage/StorageManager.m`
-- `+pipeline/+storage/StorageBackend.m`
-- `+pipeline/+storage/HDF5Backend.m`
-
-This keeps the storage subsystem organized as its own package within the framework.
-
-## 2. Implementation Steps
-
-### 2.1. StorageBackend Interface
-
-- Define an abstract class with methods:
-  - `save(key, data)`
-  - `load(key)`
-  - `exists(key)`
-  - `delete(key)`
-- Write tests to ensure any implementation throws errors for missing keys and handles all method contracts.
-
-### 2.2. HDF5Backend Implementation
-
-- Implement all interface methods using MATLAB's HDF5 functions.
-- Write tests for:
-  - Saving and loading data
-  - Checking existence
-  - Deleting data
-  - Handling file I/O errors
-
-### 2.3. StorageManager Class
-
-- Properties:
-  - `L1_Cache` (containers.Map)
-  - `L2_Backend` (StorageBackend)
-- Methods:
-  - `cache(key, data)`: Store in L1 only
-  - `persist(key)`: Move from L1 to L2
-  - `load(key)`: Try L1, then L2, promote to L1
-- Write tests for:
-  - L1 cache hit/miss
-  - L2 fallback and promotion
-  - Data consistency between caches
-  - Error handling for missing data
-
-### 2.4. File Locking
-
-- Implement `.lock` file mechanism in `StorageManager` constructor/destructor.
-- Write tests to:
-  - Prevent concurrent access
-  - Clean up lock files on exit/error
-  - Throw specific errors when locked
-
-### 2.5. Provenance-Based Indexing
-
-- Ensure all keys are provenance hashes as described in the ADD.
-- Write tests to verify correct hash calculation and indexing.
-
-### 2.6. Storage Policies
-
-- Implement support for `persistent`, `memory_only`, and function-handle policies.
-- Write tests for each policy, ensuring correct persistence and memory behavior.
-
-### 2.7. Error Handling and Logging
-
-- Define and document all error types (e.g., `FileLocked`, `OverwriteAttempt`, `DataNotFound`).
-- Integrate logging for all key events (cache hits, persistence, errors).
-- Use the `advanced-logger` package (see `vendor/advanced-logger`) as the single logger for this project. Do not use a mock logger; all logging should go through advanced-logger.
-- Write tests to trigger and verify each error and log output.
-
-### 2.8. Garbage Collection (DO NOT IMPLEMENT THIS NOW)
-
-- Implement `pipeline.gc(config)` using mark-and-sweep.
-- Write tests to:
-  - Mark live hashes
-  - Sweep and delete unreachable data
-  - Verify correct data retention and deletion
-
-## 3. Test-Driven Development (TDD) Instructions
-
-- Write all tests before implementing functionality.
-- Use MATLAB's class-based unit testing framework.
-- Each method and feature must have:
-  - Positive tests (expected behavior)
-  - Negative tests (error cases)
-  - Edge case tests (boundary conditions)
-- Use temporary files and mock objects to isolate tests.
-- Ensure tests are independent and repeatable.
-
-## 4. Documentation
-
-- Document all public methods and error types.
-- Update `CONTRIBUTING.md` with error taxonomy and logging conventions.
-
-## 5. References
-
-- See ADD Section 3.4 for architecture and API details.
-- See ROADMAP Phase 2 for implementation and testing tasks.
-
-- Refer to the PlantUML diagram in `docs/diagrams/storage.puml` for component relationships.
-- Storage component source files are located in `+pipeline/+storage/`.
+The storage system should be implemented using a **bottom-up approach**. You start with the most fundamental components (the interfaces and concrete backends) and build up to the higher-level abstractions (the manager and decorators). This ensures that each layer rests on a solid, tested foundation.
 
 ---
 
-Follow these instructions strictly to ensure a robust, maintainable, and fully tested storage subsystem for the pipeline framework.
+## Step 1: Define the `IStorageBackend` Interface
+
+This is the contract that all storage components must follow.
+
+* **How to Implement:**
+  * Create an abstract class `IStorageBackend` that defines the method signatures without any implementation.
+
+    ```matlab
+    classdef (Abstract) IStorageBackend < handle
+        methods (Abstract)
+            write(obj, key, data);
+            data = read(obj, key);
+            flag = exists(obj, key);
+            delete(obj, key);
+        end
+    end
+    ```
+
+* **How to Ensure Correctness:** This is a contract, so correctness is defined by the components that implement it.
+* **How to Test:** You cannot test an interface directly. Its purpose is to enforce consistency in other classes.
+
+---
+
+## Step 2: Implement the L2 `HDF5Backend`
+
+This is the first concrete component, handling persistent storage.
+
+* **How to Implement:**
+  * Create a class `HDF5Backend` that inherits from `IStorageBackend`.
+  * Implement the four required methods using MATLAB's HDF5 functions (`h5create`, `h5write`, `h5read`, etc.). Store each `key` as a group within the HDF5 file.
+  * **Crucially**, implement the file-locking mechanism. The constructor should create a `.lock` file, and the destructor (`delete` method) must remove it inside a `try/catch` block to ensure it's always cleaned up.
+* **How to Ensure Correctness:**
+  * Wrap all file I/O operations in `try/catch` blocks to handle low-level errors gracefully (e.g., disk full, permissions error).
+  * Ensure the `.lock` file is *always* removed, even if the pipeline errors out. This is the most critical part for preventing hung states.
+* **How to Test:**
+  * Write a unit test class (`TestHDF5Backend`).
+  * **Happy Path:** Test the full CRUD cycle: `write` a key, `exists` should return true, `read` should return the correct data, `delete` the key, `exists` should now return false.
+  * **Edge Cases:**
+    * Test reading a non-existent key (should throw a specific error).
+    * Test writing to a key that already exists (should throw an "overwrite attempt" error).
+    * Test the file lock: verify the `.lock` file is created on construction and deleted on destruction.
+
+---
+
+## Step 3: Implement the L1 `InMemoryBackend`
+
+This is the simpler, in-memory cache.
+
+* **How to Implement:**
+  * Create a class `InMemoryBackend` that inherits from `IStorageBackend`.
+  * Use a `containers.Map` as the internal data store.
+  * The interface methods (`write`, `read`, `exists`, `delete`) become simple one-line calls to the map's methods (`obj.Map(key) = data`, `obj.Map(key)`, `isKey`, `remove`).
+* **How to Ensure Correctness:** `containers.Map` is a robust built-in, so the main concern is correctly mapping the interface methods.
+* **How to Test:**
+  * Write a unit test class (`TestInMemoryBackend`).
+  * Test the same CRUD cycle as the `HDF5Backend`.
+  * Verify its volatility: create an instance, write data to it, then create a *new* instance and confirm the data is gone.
+
+---
+
+## Step 4: Implement the `StorageManager`
+
+This component orchestrates the L1 and L2 backends.
+
+* **How to Implement:**
+  * Create the `StorageManager` class. Its constructor will accept two objects that implement `IStorageBackend` (one for L1, one for L2).
+  * Implement the public API (`load`, `cache`, `persist`) precisely according to the logic in the ADD. For example, `load` checks L1, then L2, then promotes to L1.
+* **How to Ensure Correctness:** The logic must be flawless. Meticulously trace the data flow for each method to ensure it matches the specification.
+* **How to Test:**
+  * This requires **mocking**. You cannot test the `StorageManager`'s logic without having full control over its dependencies (the L1 and L2 backends).
+  * In your test class (`TestStorageManager`), create mock `IStorageBackend` objects (using MATLAB's Mocking Framework or a simple custom class).
+  * **Test `load`:**
+    * **L1 Hit:** Configure the L1 mock to have the key. Verify `load` returns the data and that the L2 mock was *never* called.
+    * **L1 Miss / L2 Hit:** Configure L1 to be empty and L2 to have the key. Verify `load` returns the correct data, that the L2 mock's `read` was called once, and that the L1 mock's `write` was called once (for promotion).
+    * **Full Miss:** Configure both mocks to be empty. Verify `load` throws a `DataNotFound` error.
+  * **Test `persist`:** Configure the L1 mock to have data. Call `persist`. Verify that the L1 mock's `read` was called and the L2 mock's `write` was called with the correct data.
+
+---
+
+## Step 5: Implement the `ConcurrentStorageDecorator`
+
+This is the final layer that adds thread safety.
+
+* **How to Implement:**
+  * Create the `ConcurrentStorageDecorator` class that also inherits from `IStorageBackend`.
+  * Its constructor takes another `IStorageBackend` object to "wrap".
+  * It should have an internal property for a lock object.
+  * Implement each interface method (`write`, `read`, `exists`, `delete`) by wrapping the call to the underlying backend in a `lock`/`unlock` sequence, using a `try/finally` block to guarantee the lock is always released.
+  * For the `read` method (or whichever method corresponds to the `StorageManager`'s `load`), implement the **double-checked locking** pattern precisely as discussed.
+* **How to Ensure Correctness:** The `try/finally` pattern for lock release is non-negotiable. A failure to release a lock will deadlock the entire application.
+* **How to Test:**
+  * This is the most complex testing phase and requires the Parallel Computing Toolbox.
+  * **Write Contention Test:** In a `parfor` loop, have many workers try to `write` to the *exact same key*. The test passes if it completes without error and the final value in the storage is one of the written values (i.e., no file corruption).
+  * **Double-Checked Lock Test:**
+        1. Set up a test where a key exists only in a mock L2 backend.
+        2. Use a counter (e.g., a `parallel.pool.DataQueue`) to track how many times the L2 `read` method is called.
+        3. In a `parfor` loop, have many workers try to `load` that same key through the concurrent `StorageManager`.
+        4. The test passes if the final count of L2 reads is **exactly 1**. This proves that only the first thread did the expensive work and all others got the promoted result from the L1 cache.

@@ -9,27 +9,37 @@ skinparam interface {
   shadowing false
 }
 
-interface "IStorageBackend" as IHandler {
+' The IStorageBackend interface is clean and has no knowledge of locking.
+interface "IStorageBackend" as IBackend {
   +write(key, data)
   +read(key)
-  +getLock(key)
+  +exists(key)
+  +delete(key)
 }
 
-class "HDF5Backend" implements IHandler {
-  ' Concrete implementation
+class "HDF5Backend" implements IBackend {
+  ' Concrete implementation of I/O operations.
 }
 
-class "ConcurrentStorageDecorator" implements IHandler {
+' The decorator implements the same interface and adds the locking behavior.
+class "ConcurrentStorageDecorator" implements IBackend {
   -backend: IStorageBackend
+  -lock: internal_lock_object
   +write(key, data)
   +read(key)
+  +exists(key)
+  +delete(key)
 }
 
 note right of ConcurrentStorageDecorator
-  1. Calls backend.getLock(key)
-  2. Acquires lock
-  3. Calls backend.write() or backend.read()
-  4. Releases lock
+  **Double-Checked Locking for Reads:**
+  1. Check if key exists (e.g., in L1 cache). If so, return.
+  2. **Acquire lock.**
+  3. Check again if key exists. If so, release lock and return.
+  4. Read data from wrapped backend (e.g., from L2 cache).
+  5. Write data to cache if needed (promote to L1).
+  6. **Release lock.**
+  7. Return data.
 end note
 
 ConcurrentStorageDecorator o-- "1" HDF5Backend : wraps

@@ -463,7 +463,11 @@ To support parallel execution, the storage system must be thread-safe. This is a
 
 #### Handling Concurrency with Decorators
 
+To support parallel execution, the storage system must be thread-safe. This is achieved without modifying the core storage backends by using the **Decorator Pattern**, which allows for adding new behaviors (like locking) to existing objects dynamically.
+
 A generic `ConcurrentStorageDecorator` can be wrapped around any `IStorageBackend` instance to make it thread-safe. This decorator's only responsibility is to acquire a lock before an operation and release it afterward.
+
+To prevent race conditions where multiple threads attempt to read from the L2 cache simultaneously for the same missing key, the decorator must implement a **double-checked locking** pattern for read operations. This ensures the expensive L2 read is only performed once.
 
 ```plantuml
 !include diagrams/storage_concurrency.puml
