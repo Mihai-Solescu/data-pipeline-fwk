@@ -34,7 +34,7 @@ The `config.stages` struct defines the computational graph. Each **field** in th
 
 * **`.function`**: A function handle to the stateless component that performs the computation.
 * **`.inputs`** (struct, optional): A struct mapping local input names for the function to their **Dependency Recipes** (e.g., `struct('data_in', 'previous_stage.output_name')`). This defines the stage's connections within the DAG. If this field is missing, the stage is considered to have no inputs.
-* **`.params`** (cell array of strings, optional): A cell array of strings listing all parameter names the stage depends on, whether global or from the grid. This is crucial for granular hashing. If this field is missing, the stage is considered to have only the inherited parameter dependencies, implicitely, and no used ones. This means that at runtime the params struct passed to the function will be empty, even though the inputs that will be passed in will be those with specific values for their inherited parameters, and thus the output will be dependent on the same parameter values.
+* **`.params`** (cell array of strings, optional): A cell array of strings listing all parameter names the stage depends on, whether global or from the grid. This is crucial for granular hashing. If this field is missing, the stage is considered to have only the inherited parameter dependencies, implicitly, and no used ones. This means that at runtime the params struct passed to the function will be empty, even though the inputs that will be passed in will be those with specific values for their inherited parameters, and thus the output will be dependent on the same parameter values.
 * **`.outputs`** (cell array of structs, optional): A cell array of structs, where each struct defines an output's `.name` and its `.storage_policy`. If this field is missing, the stage is considered to have no outputs.
 * **`.execution_mode`** (string, optional): Controls the stage's execution scope. It defaults to `'per_run'`.
   * `'per_run'`: The stage runs once for each valid parameter combination from the grid.
@@ -73,29 +73,29 @@ The `config` struct also contains fields for controlling execution behavior:
 
 ### 1.6. The `StageGraph` and Parameter Dependencies
 
-The `StageGraph` class is not just a passive representation of the pipeline's structure; it's an intelligent model of the data and parameter flow. Its responsibilities extend beyond simple validation to include the resolution of implicit parameter dependencies, ensuring the framework's execution engine receives a complete and accurate picture of each task's provenance.
+The `StageGraph` class is not just a passive representation of the pipeline's structure; it's an intelligent model of the data and parameter flow. Its responsibilities extend beyond simple validation to include the resolution of effective parameter dependencies, ensuring the framework's execution engine receives a complete and accurate picture of each task's provenance.
 
 #### The `StageGraph`'s Core Responsibility
 
 The `StageGraph` object’s primary purpose is to provide a comprehensive and immutable model of the pipeline's computational graph. It ensures the graph's structural integrity and resolves all parameters that influence each stage, whether they are explicitly declared by the user or implicitly inherited through dependencies.
 
-Specifically, the `StageGraph` constructor performs a crucial preprocessing step: for every stage, it computes a complete list of its *implicit parameters* by combining the parameters explicitly listed in a stage's `.params` field with all parameters from all of its upstream dependencies.
+Specifically, the `StageGraph` constructor performs a crucial preprocessing step: for every stage, it computes a complete list of its *effective parameters* by combining the parameters explicitly listed in a stage's `.params` field with all parameters from all of its upstream dependencies.
 
-#### The Algorithm for Implicit Dependency Resolution
+#### The Algorithm for Effective Dependency Resolution
 
-The `StageGraph` constructor performs a traversal of the graph to build a complete list of implicit parameters for each stage. The algorithm works as follows:
+The `StageGraph` constructor performs a traversal of the graph to build a complete list of effective parameters for each stage. The algorithm works as follows:
 
-1. **Initialize:** For each stage, a list of its implicit parameters is initialized to contain the union of all parameters explicitly declared in the stage's `.params` field.
+1. **Initialize:** For each stage, a list of its effective parameters is initialized to contain the union of all parameters explicitly declared in the stage's `.params` field.
 
 2. **Iterate and Aggregate:** The algorithm iterates through the stages in a reverse topological sort order (from outputs to inputs). For each stage:
-    * It retrieves the implicit parameters of all its direct successors (stages that depend on it).
-    * It adds these parameters to the implicit parameter list of the current stage.
+    * It retrieves the effective parameters of all its direct successors (stages that depend on it).
+    * It adds these parameters to the effective parameter list of the current stage.
 
-This process ensures that by the time the algorithm reaches a given stage, all parameters from its entire downstream subtree have been propagated back and aggregated. The result is an immutable property in the `StageGraph` class called `implicit_params`, which is a map where each key is a stage name and each value is a cell array of all parameter names—both explicit and implicit—that influence that stage's computation.
+This process ensures that by the time the algorithm reaches a given stage, all parameters from its entire downstream subtree have been propagated back and aggregated. The result is an immutable property in the `StageGraph` class called `effective_params`, which is a map where each key is a stage name and each value is a cell array of all parameter names—both explicit and effective—that influence that stage's computation.
 
 #### Intended Use
 
-This pre-computed `implicit_params` map is intended to be used by the framework's scheduling and hashing components. When generating the unique tasks for a stage, this map ensures that the correct parameter space is considered, capturing all upstream dependencies. Similarly, when computing the `Provenance Hash`, this map is used to ensure that the hash is derived from the complete set of influencing parameters, guaranteeing that any change to an upstream parameter will correctly invalidate the cache for all affected downstream stages.
+This pre-computed `effective_params` map is intended to be used by the framework's scheduling and hashing components. When generating the unique tasks for a stage, this map ensures that the correct parameter space is considered, capturing all upstream dependencies. Similarly, when computing the `Provenance Hash`, this map is used to ensure that the hash is derived from the complete set of influencing parameters, guaranteeing that any change to an upstream parameter will correctly invalidate the cache for all affected downstream stages.
 
 However, the framework will still honor the user's explicit `.params` list when executing the stage function itself, passing only those declared parameters to maintain a clean and decoupled interface for the scientific components.
 
@@ -155,7 +155,7 @@ The Provenance Hash is an SHA-256 hash derived from three and only three sources
 
 1. **Code Hash**: An SHA-256 hash of the stage's component `.m` file. Any change to the source code, including comments, will change this hash.
 2. **Input Hashes**: An SHA-256 hash derived from a deterministically sorted list of the Provenance Hashes of all direct data inputs. For stages with multiple inputs (e.g., fan-in nodes), the list of input hashes is sorted alphabetically before being hashed to ensure the result is deterministic and independent of execution order.
-3. **Granular Parameter Hash**: An SHA-256 hash of a canonical representation of a struct containing the specific parameters the stage depends on. The struct's **field names** are the parameter names, and the **field values** are their specific values for the task. To ensure determinism, the fields of this struct are sorted alphabetically by name before being serialized and hashed.
+3. **Granular Parameter Hash**: An SHA-256 hash of a canonical representation of a struct containing explicit parameters the stage depends on (the explicit parameters listed in `.params`). The struct's **field names** are the parameter names, and the **field values** are their specific values for the task. To ensure determinism, the fields of this struct are sorted alphabetically by name before being serialized and hashed.
 
 ### 2.2. The Parameter Contract
 
@@ -239,6 +239,45 @@ This model is not a different implementation, but rather the formal computer sci
 ### 2.6. Targeting stages
 
 The ability to specify target stages for selective execution is a planned optimization for a future release. This feature will allow users to run only the minimal subgraph of dependencies required to produce a desired output, which is ideal for debugging or regenerating specific results. Its implementation will be deferred to allow for the initial focus to remain on stabilizing the core framework's ability to robustly execute and cache the entire defined pipeline. This functionality can be cleanly integrated later by adding a reverse-dependency graph traversal step that prunes the execution plan before the main orchestrator begins its work.
+
+### 2.7 The ProvenanceHasher Service
+
+To ensure that the logic for creating provenance hashes is centralized, robust, and testable, the framework uses a dedicated **`ProvenanceHasher`** service. This class is the sole authority on how to compute the final `ProvenanceHash` for any given computational task.
+
+#### Core Responsibility
+
+The `ProvenanceHasher`'s only responsibility is to correctly implement the framework's three-part hashing formula. It receives a `Task` object from the `Executor`, which contains all the necessary information for a single computation. It then uses the low-level `pipeline.internal.Hasher` utility to perform the underlying cryptographic operations.
+
+This design cleanly separates the high-level *rules* of provenance from the low-level *mechanics* of hashing. The `ProvenanceHasher` is a non-recursive service; it is only ever asked to compute the hash for a task whose inputs are already known and provided as hashes.
+
+#### Public API
+
+The `ProvenanceHasher` has to be initialized with the specific `StageGraph` for the pipeline run and a logger instance for recording events and errors. This graph provides the context needed to resolve stage names and their dependencies, while the logger ensures all operations are properly tracked according to the framework's logging taxonomy.
+
+**Constructor: `ProvenanceHasher(stageGraph, logger)`**
+
+* **`stageGraph` (`pipeline.utility.StageGraph`):** A fully constructed StageGraph object that provides stage configuration and parameter dependency information.
+* **`logger` (`mlog.Logger`):** A logger instance that follows the framework's hierarchical naming convention (e.g., `mlog.Logger('pipeline:ProvenanceHasher')`).
+
+The `ProvenanceHasher` has one public method:
+
+**`provenanceHash = computeProvenanceHash(task)`**
+
+This method computes the definitive SHA-256 hash for a task.
+
+* **`task` (`struct`):** A struct with three fields:
+  * `stage_name` (`char`): The name of the stage to execute.
+  * `parameters` (`struct`): The complete parameter struct for the run, which provides the values needed for hashing. The hasher will safely ignore any parameters not explicitly used by the stage.
+  * `input_hashes` (`struct`): A struct mapping local input names to the provenance hash of each dependency. Should be empty for source stages.
+* **Returns:** A 64-character lowercase SHA-256 hash string.
+
+#### Internal Methods
+
+The service uses a set of private methods to assemble the three component hashes:
+
+* `getStageCodeHash(stage_name)`: Computes the hash of the stage's `.m` file. It uses an internal in-memory cache to avoid re-reading the same file multiple times during a single pipeline run.
+* `getGranularParamHash(stage_name, all_params)`: Computes the hash of a struct containing only the parameters explicitly declared in the stage's `.params` list.
+* `getInputSetHash(input_hashes_struct)`: Computes the hash of the deterministically sorted input hashes struct.
 
 ---
 
