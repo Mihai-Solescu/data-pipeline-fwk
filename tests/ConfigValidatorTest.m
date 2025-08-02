@@ -357,6 +357,276 @@ classdef ConfigValidatorTest < matlab.unittest.TestCase
             testCase.verifyTrue(true, 'Should accept both char and string types');
         end
         
+        %% Integration tests with real-world configuration
+        
+        function testValidateLoggingConfig_GenerateConfigExample(testCase)
+            % Test validation of logging config from generate_config() example
+            
+            % Add the examples directory to path relative to test directory
+            testDir = fileparts(mfilename('fullpath'));
+            examplesDir = fullfile(testDir, '..', 'examples', 'extended_hankel_havok');
+            addpath(examplesDir);
+            
+            try
+                % Get the real configuration
+                config = generate_config();
+                
+                % Should validate successfully
+                testCase.validator.validateLoggingConfig(config);
+                testCase.verifyTrue(true, 'Should accept generate_config() logging configuration');
+                
+                % Verify specific logging settings are as expected
+                testCase.verifyTrue(isfield(config.logging, 'console_level'), ...
+                    'generate_config should include console_level');
+                testCase.verifyTrue(isfield(config.logging, 'file_level'), ...
+                    'generate_config should include file_level');
+                testCase.verifyTrue(isfield(config.logging, 'filepath'), ...
+                    'generate_config should include filepath');
+                
+                % Verify values are valid
+                testCase.verifyEqual(config.logging.console_level, 'info', ...
+                    'Console level should be info');
+                testCase.verifyEqual(config.logging.file_level, 'debug', ...
+                    'File level should be debug');
+                testCase.verifyEqual(config.logging.filepath, 'logs/havok_modular.log', ...
+                    'Filepath should match expected value');
+                    
+            catch ME
+                % Clean up path before rethrowing
+                rmpath(examplesDir);
+                rethrow(ME);
+            end
+            
+            % Clean up path
+            rmpath(examplesDir);
+        end
+        
+        function testValidateBasicConfig_GenerateConfigExample(testCase)
+            % Test comprehensive validation of the generate_config() example
+            
+            % Add the examples directory to path relative to test directory
+            testDir = fileparts(mfilename('fullpath'));
+            examplesDir = fullfile(testDir, '..', 'examples', 'extended_hankel_havok');
+            addpath(examplesDir);
+            
+            try
+                % Get the real configuration
+                config = generate_config();
+                
+                % Should validate successfully
+                testCase.validator.validateBasicConfig(config);
+                testCase.verifyTrue(true, 'Should accept generate_config() basic configuration');
+                
+                % Verify all required top-level fields are present
+                testCase.verifyTrue(isfield(config, 'stages'), ...
+                    'generate_config should include stages');
+                testCase.verifyTrue(isfield(config, 'params'), ...
+                    'generate_config should include params');
+                testCase.verifyTrue(isfield(config, 'output_filename'), ...
+                    'generate_config should include output_filename');
+                
+                % Verify parameter structure
+                testCase.verifyTrue(isfield(config.params, 'globals'), ...
+                    'params should include globals');
+                testCase.verifyTrue(isfield(config.params, 'grid'), ...
+                    'params should include grid');
+                testCase.verifyTrue(isfield(config.params, 'filter'), ...
+                    'params should include filter function');
+                
+                % Verify no parameter name collisions
+                global_names = fieldnames(config.params.globals);
+                grid_names = fieldnames(config.params.grid);
+                common_names = intersect(global_names, grid_names);
+                testCase.verifyEmpty(common_names, ...
+                    'No parameter name collisions should exist between globals and grid');
+                
+            catch ME
+                % Clean up path before rethrowing
+                rmpath(examplesDir);
+                rethrow(ME);
+            end
+            
+            % Clean up path
+            rmpath(examplesDir);
+        end
+        
+        function testValidateGenerateConfig_ParameterTypes(testCase)
+            % Test that parameter types in generate_config() are valid
+            
+            % Add the examples directory to path relative to test directory
+            testDir = fileparts(mfilename('fullpath'));
+            examplesDir = fullfile(testDir, '..', 'examples', 'extended_hankel_havok');
+            addpath(examplesDir);
+            
+            try
+                % Get the real configuration
+                config = generate_config();
+                
+                % Verify globals are scalars as required
+                globals = config.params.globals;
+                global_fields = fieldnames(globals);
+                
+                for i = 1:length(global_fields)
+                    field_name = global_fields{i};
+                    field_value = globals.(field_name);
+                    testCase.verifyTrue(isscalar(field_value), ...
+                        sprintf('Global parameter %s should be scalar, got %s', ...
+                        field_name, mat2str(size(field_value))));
+                end
+                
+                % Verify grid parameters are arrays
+                grid = config.params.grid;
+                grid_fields = fieldnames(grid);
+                
+                for i = 1:length(grid_fields)
+                    field_name = grid_fields{i};
+                    field_value = grid.(field_name);
+                    % Grid parameters can be vectors or cell arrays
+                    testCase.verifyTrue(isvector(field_value) || iscell(field_value), ...
+                        sprintf('Grid parameter %s should be vector or cell array', field_name));
+                end
+                
+                % Verify filter function is callable
+                testCase.verifyTrue(isa(config.params.filter, 'function_handle'), ...
+                    'Filter should be a function handle');
+                
+            catch ME
+                % Clean up path before rethrowing
+                rmpath(examplesDir);
+                rethrow(ME);
+            end
+            
+            % Clean up path
+            rmpath(examplesDir);
+        end
+        
+        function testValidateGenerateConfig_StageStructure(testCase)
+            % Test that stage definitions in generate_config() are well-formed
+            
+            % Add the examples directory to path relative to test directory
+            testDir = fileparts(mfilename('fullpath'));
+            examplesDir = fullfile(testDir, '..', 'examples', 'extended_hankel_havok');
+            addpath(examplesDir);
+            
+            try
+                % Get the real configuration
+                config = generate_config();
+                
+                % Verify stages structure
+                stages = config.stages;
+                stage_names = fieldnames(stages);
+                
+                testCase.verifyGreaterThan(length(stage_names), 0, ...
+                    'Should have at least one stage defined');
+                
+                % Check each stage has expected structure
+                for i = 1:length(stage_names)
+                    stage_name = stage_names{i};
+                    stage_array = stages.(stage_name);
+                    
+                    testCase.verifyTrue(isstruct(stage_array), ...
+                        sprintf('Stage %s should be a struct array', stage_name));
+                    
+                    % Check each element in the stage array
+                    for k = 1:length(stage_array)
+                        stage_def = stage_array(k);
+                        
+                        % Verify function handle exists
+                        testCase.verifyTrue(isfield(stage_def, 'function'), ...
+                            sprintf('Stage %s element %d should have function field', stage_name, k));
+                        stage_func = stage_def.function;
+                        testCase.verifyTrue(isa(stage_func, 'function_handle'), 'Stage function should be a function handle');
+                        
+                        % Verify params field if present
+                        if isfield(stage_def, 'params')
+                            stage_params = stage_def.params;
+                            % Params can be various types, just verify it exists
+                            testCase.verifyTrue(~isempty(stage_params), 'Stage params should not be empty if present');
+                        end
+                        
+                        % Verify outputs field if present
+                        if isfield(stage_def, 'outputs')
+                            stage_outputs = stage_def.outputs;
+                            
+                            if isstruct(stage_outputs)
+                                % Single struct output
+                                testCase.verifyTrue(isfield(stage_outputs, 'name'), 'Stage output should have name field');
+                                testCase.verifyTrue(isfield(stage_outputs, 'storage_policy'), 'Stage output should have storage_policy field');
+                            elseif iscell(stage_outputs)
+                                % Cell array of struct outputs
+                                for j = 1:length(stage_outputs)
+                                    output_def = stage_outputs{j};
+                                    testCase.verifyTrue(isstruct(output_def), 'Stage output should be a struct');
+                                    testCase.verifyTrue(isfield(output_def, 'name'), 'Stage output should have name field');
+                                    testCase.verifyTrue(isfield(output_def, 'storage_policy'), 'Stage output should have storage_policy field');
+                                end
+                            else
+                                testCase.verifyFail('Stage outputs should be either struct or cell array');
+                            end
+                        end
+                        
+                        % Verify execution_mode if present
+                        if isfield(stage_def, 'execution_mode')
+                            valid_modes = {'per_run', 'global'};
+                            exec_mode = stage_def.execution_mode;
+                            testCase.verifyTrue(ismember(exec_mode, valid_modes), 'Stage execution_mode should be per_run or global');
+                        end
+                    end
+                end
+                
+            catch ME
+                % Clean up path before rethrowing
+                rmpath(examplesDir);
+                rethrow(ME);
+            end
+            
+            % Clean up path
+            rmpath(examplesDir);
+        end
+        
+        function testValidateGenerateConfig_OptionalFields(testCase)
+            % Test that optional fields in generate_config() are valid when present
+            
+            % Add the examples directory to path relative to test directory
+            testDir = fileparts(mfilename('fullpath'));
+            examplesDir = fullfile(testDir, '..', 'examples', 'extended_hankel_havok');
+            addpath(examplesDir);
+            
+            try
+                % Get the real configuration
+                config = generate_config();
+                
+                % Test error_mode if present
+                if isfield(config, 'error_mode')
+                    valid_error_modes = {'resilient', 'fail_fast'};
+                    testCase.verifyTrue(ismember(config.error_mode, valid_error_modes), ...
+                        'error_mode should be resilient or fail_fast');
+                end
+                
+                % Test num_workers if present
+                if isfield(config, 'num_workers')
+                    testCase.verifyTrue(isnumeric(config.num_workers), ...
+                        'num_workers should be numeric');
+                    testCase.verifyTrue(config.num_workers > 0, ...
+                        'num_workers should be positive');
+                end
+                
+                % Verify overall structure passes both logging and basic validation
+                testCase.validator.validateLoggingConfig(config);
+                testCase.validator.validateBasicConfig(config);
+                
+                testCase.verifyTrue(true, 'generate_config() should pass complete validation');
+                
+            catch ME
+                % Clean up path before rethrowing
+                rmpath(examplesDir);
+                rethrow(ME);
+            end
+            
+            % Clean up path
+            rmpath(examplesDir);
+        end
+        
     end % methods (Test)
     
     methods (Static, Access = private)
