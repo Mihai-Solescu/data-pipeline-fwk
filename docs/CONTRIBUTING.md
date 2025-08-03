@@ -34,6 +34,70 @@ We use `mathworks/advanced-logger` for all logging. When writing or modifying co
 
 ---
 
+---
+
+---
+
+---
+
+## Testing Strategy
+
+This project adheres to a **Test-Driven Development (TDD)** model. All new features must be accompanied by a comprehensive suite of tests to ensure correctness, robustness, and maintainability. Our goal is 100% test coverage for all logic paths.
+
+All tests should be written using MATLAB's built-in Unit Test Framework (`matlab.unittest.TestCase`).
+
+### `StorageSystemTest`
+
+This class contains the complete test suite for all components within the storage system. It is divided into sections to test each class in isolation before validating their integration and concurrent behavior.
+
+#### 1. Unit Tests for `FileBackend` (L2 Persistent Store)
+
+* **`testWriteReadCycle`**: Verifies that a struct written to a key can be loaded and is identical to the original.
+* **`testErrorOnOverwrite`**: Confirms that attempting to `write` to a key (file) that already exists throws an `OverwriteAttempt` error.
+* **`testErrorOnReadNonExistentKey`**: Confirms that reading a key that does not correspond to a file throws a `ReadError`.
+* **`testRemoveDeletesFile`**: Verifies that calling `remove(key)` successfully deletes the corresponding `.mat` file from the disk.
+
+#### 2. Unit Tests for `InMemoryBackend` (L1 In-Memory Store)
+
+* **`testWriteReadCycle`**: Verifies data can be written and read back.
+* **`testErrorOnOverwrite`**: Confirms that writing to an existing key throws an `OverwriteAttempt` error.
+* **`testVolatility`**: Verifies that data is gone when a new instance of the class is created.
+
+#### 3. Unit Tests for `StorageManager` (using Mock Backends)
+
+* **`testLoadFromL1`**: Verifies that `load` retrieves data from the L1 mock and that the L2 mock is never touched.
+* **`testLoadFromL2WithPromotion`**: Verifies that on an L1 miss, `load` retrieves data from the L2 mock and then writes it to the L1 mock.
+* **`testLoadFullMiss`**: Verifies `load` throws a `DataNotFound` error when the key is in neither mock backend.
+* **`testCacheToL1Only`**: Verifies `cache` only calls the `write` method on the L1 mock.
+* **`testPersistFromL1ToL2`**: Verifies `persist` calls `read` on the L1 mock and `write` on the L2 mock.
+
+#### 4. Concurrency and Stress Tests
+
+These tests require the Parallel Computing Toolbox and **must** use the **Asynchronous Test Harness with Timeout** pattern (`parfeval`/`fetchOutputs`) to prevent the test suite from hanging.
+
+* **`testL1WriteContentionOnSameKey`**: Proves the L1 cache lock works. Many workers simultaneously call `cache` on the **same key**. The test passes if it completes without timeout and throws the expected `OverwriteAttempt` error from all but one worker, proving access was correctly serialized.
+
+* **`testDoubleCheckedLockingPreventsRaceCondition`**: Proves read-promotion is efficient. A key is pre-populated in a mock L2 backend. A `DataQueue` counts L2 `read` calls. Many workers call `load` on the same key. The test passes if the final count of L2 reads is **exactly 1**.
+
+* **`testHighThroughputNoDroppedL1Writes`**: A critical correctness test for the L1 cache.
+  * **Action**: Many parallel workers `cache` thousands of unique keys and log the keys they wrote to a `DataQueue`.
+  * **Verification**: The test passes only if **100% of the logged keys** exist in the L1 `InMemoryBackend` at the end. This proves the lock is effective and no in-memory writes were lost during high contention.
+
+* **`testParallelL2WritesSucceed`**: Proves the core performance assumption of the new L2 backend.
+  * **Action**: Many parallel workers call `write` on a real `FileBackend` instance, each with a unique key. This bypasses the `StorageManager` to test the backend directly.
+  * **Verification**: The test passes if it completes without timeout or error. A final check confirms that all files were created on disk. This proves that writing to unique files is a non-blocking operation that can happen in parallel.
+
+* **`testHighThroughputInterleavedReadWrite`**: A long-running (30-60 seconds) stress test of the full, decorated `StorageManager`.
+  * **Action**: Many parallel workers continuously perform a random mix of operations:
+    * `load` a random key from a large, pre-populated set in the L2 cache.
+    * `cache` a new, unique key to L1.
+    * `persist` a random key that has been cached to L1.
+  * **Verification**: The test passes if it completes without deadlocks (timeout) or data corruption errors (e.g., a `load` returning incorrect data). This validates the entire system's stability under a realistic, chaotic workload.
+
+* **`testPersistContentionIntegrity`**: This test specifically targets the `persist` operation under load.
+  * **Action**: The L1 cache is pre-populated with thousands of keys. Many parallel workers then call `persist` on different subsets of those keys.
+  * **Verification**: The test passes if it completes without timeout and a final check of the file system confirms that **all keys were successfully written** as `.mat` files to the L2 persistent store.
+
 ## Error and Log Taxonomy
 
 To ensure that the framework's behavior is predictable and debuggable, we use a standardized taxonomy for all custom errors and significant log messages.
@@ -56,28 +120,31 @@ I've updated and expanded the taxonomy to cover the entire storage system, assig
 
 This taxonomy is divided by component to clarify where each message originates.
 
-#### `HDF5Backend` (L2 Persistent Store)
+#### `FileBackend` (L2 Persistent Store)
 
-These logs relate to the direct management of the on-disk HDF5 file and its associated lock file.
+These logs relate to the direct management of individual `.mat` files on the disk.
 
 | Identifier | Log Level | Description |
 | :--- | :--- | :--- |
-| `pipeline:HDF5Backend:FileLocked` | `FATAL` | The `.lock` file for the target cache already exists, preventing a new pipeline instance from starting. |
-| `pipeline:HDF5Backend:LockCreationFailed`| `FATAL` | The framework failed to create the `.lock` file, likely due to file system permission issues. |
-| `pipeline:HDF5Backend:WriteError` | `ERROR` | A low-level error occurred during an HDF5 write operation (e.g., disk full, file corruption). |
-| `pipeline:HDF5Backend:ReadError` | `ERROR` | A low-level error occurred during an HDF5 read operation (e.g., file corruption, dataset not found). |
-| `pipeline:HDF5Backend:OverwriteAttempt` | `ERROR` | An attempt was made to write to a key that already exists, which violates the immutability contract. |
-| `pipeline:HDF5Backend:LockCleanupFailed`| `WARN` | The destructor failed to delete the `.lock` file. This is not fatal but requires user attention to prevent future runs from failing. |
-| `pipeline:HDF5Backend:LockAcquired` | `DEBUG` | Logged upon successfully creating the `.lock` file for the HDF5 store. |
-| `pipeline:HDF5Backend:LockReleased` | `DEBUG` | Logged upon successfully deleting the `.lock` file at the end of a run. |
+| `pipeline:FileBackend:WriteError` | `ERROR` | A low-level error occurred during a `save` operation (e.g., disk full, file system permissions error). |
+| `pipeline:FileBackend:ReadError` | `ERROR` | A low-level error occurred during a `load` operation (e.g., file corruption, permissions error, or the key does not exist). |
+| `pipeline:FileBackend:OverwriteAttempt` | `ERROR` | An attempt was made to `write` to a key that already corresponds to an existing file, violating the immutability contract. |
+| `pipeline:FileBackend:RemoveError` | `WARN` | The framework failed to delete a file during a `remove` operation, possibly due to file permissions. |
+
+---
 
 #### `InMemoryBackend` (L1 In-Memory Store)
 
-This component is a simple wrapper around `containers.Map` and has minimal specific logging.
+These logs relate to the management of the shared, volatile in-memory cache.
 
 | Identifier | Log Level | Description |
 | :--- | :--- | :--- |
-| `pipeline:InMemoryBackend:CacheCleared` | `INFO` | The in-memory cache has been cleared, for example, at the end of a pipeline run. |
+| `pipeline:InMemoryBackend:OverwriteAttempt` | `ERROR` | An attempt was made to `write` to a key that already exists in the L1 cache, violating the immutability contract. |
+| `pipeline:InMemoryBackend:KeyNotFound` | `ERROR` | An attempt was made to `read` a key that does not exist in the L1 cache. |
+| `pipeline:InMemoryBackend:Initialized` | `DEBUG` | The in-memory cache has been successfully initialized. |
+| `pipeline:InMemoryBackend:CacheCleared` | `INFO` | The in-memory cache has been cleared at the end of a run. |
+
+---
 
 #### `StorageManager` (The Orchestrator)
 
@@ -87,11 +154,14 @@ These logs describe the flow of data between the L1 and L2 caches.
 | :--- | :--- | :--- |
 | `pipeline:StorageManager:DataNotFound` | `ERROR` | A requested key was not found in the L1 in-memory cache **or** the L2 persistent store. This is the official "cache miss" signal. |
 | `pipeline:StorageManager:PersistRequestFailed`|`ERROR` | A request was made to persist data from L1 to L2, but the key did not exist in the L1 cache. This indicates a logic error. |
+| `pipeline:StorageManager:PromotionFailed` | `WARN` | Data was successfully read from L2, but the attempt to promote it to the L1 cache failed (e.g., due to an overwrite attempt). The operation still succeeds. |
 | `pipeline:StorageManager:L2CacheHit` | `INFO` | Data was not found in the L1 cache but was successfully retrieved from the L2 persistent store. |
 | `pipeline:StorageManager:DataPromotedToL1` | `DEBUG` | Data retrieved from the L2 store was successfully written to the L1 cache for faster access. |
 | `pipeline:StorageManager:L1CacheHit` | `DEBUG` | Data was successfully found and returned directly from the L1 in-memory cache. |
 | `pipeline:StorageManager:DataCachedToL1` | `DEBUG` | A new result (from the `Executor`) was successfully written to the L1 in-memory cache. |
 | `pipeline:StorageManager:DataPersistedToL2`| `DEBUG` | Data was successfully written from the L1 cache to the L2 persistent store. |
+
+---
 
 #### `ConcurrentStorageDecorator`
 

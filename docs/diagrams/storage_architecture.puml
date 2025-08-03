@@ -13,11 +13,11 @@ interface "IStorageBackend" as IBackend {
   +write(key, data)
   +read(key)
   +exists(key)
-  +delete(key)
+  +remove(key)
 }
 
 class "InMemoryBackend" implements IBackend
-class "HDF5Backend" implements IBackend
+class "FileBackend" implements IBackend
 
 class "StorageManager" as SM {
   -l1: IStorageBackend

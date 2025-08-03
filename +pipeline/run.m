@@ -11,10 +11,10 @@ function run(config)
     % Step 1: Initialize default logger immediately
     logger = mlog.Logger('pipeline:run');
 
-    % Configure with hardcoded defaults (console output at DEBUG level)
-    logger.CommandWindowThreshold = mlog.Level.DEBUG;
+    % Configure with hardcoded defaults (console output at INFO level)
+    logger.CommandWindowThreshold = mlog.Level.INFO;
 
-    logger.debug('pipeline:run:StartingPipeline: Starting pipeline execution with configuration from %s', mfilename('fullpath'));
+    logger.debug('pipeline:run:StartingPipeline: Starting pipeline execution with configuration from %s', mfilename('fullpath')); % Change initial log level to DEBUG if needed
 
     try
         % Step 2: Instantiate the validator
@@ -23,7 +23,7 @@ function run(config)
         % Step 3: Reconfigure logging
         try
             validator.validateLoggingConfig(config);
-            logger.debug('pipeline:run:LoggingConfigValid: Logging configuration validated successfully.');
+            logger.debug('pipeline:run:LoggingConfigValid: Logging configuration validated successfully.'); % Change initial log level to DEBUG if needed
 
             reconfigure_logger(logger, config, currentDir);
         catch ME
@@ -42,7 +42,7 @@ function run(config)
         
         % Step 5: Build the stage graph
         stage_graph = pipeline.utility.StageGraph(config.stages, logger);
-        stage_graph.plot(); % Visually validate the stage graph structure
+        % stage_graph.plot(); % Visually validate the stage graph structure
         
         % Step 6: Log successful initialization
         logger.info('pipeline:run:InitializationComplete: Pipeline initialization completed successfully.');

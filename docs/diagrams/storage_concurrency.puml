@@ -14,11 +14,11 @@ interface "IStorageBackend" as IBackend {
   +write(key, data)
   +read(key)
   +exists(key)
-  +delete(key)
+  +remove(key)
 }
 
-class "HDF5Backend" implements IBackend {
-  ' Concrete implementation of I/O operations.
+class "InMemoryBackend" implements IBackend {
+  ' Concrete implementation for the L1 cache.
 }
 
 ' The decorator implements the same interface and adds the locking behavior.
@@ -28,20 +28,17 @@ class "ConcurrentStorageDecorator" implements IBackend {
   +write(key, data)
   +read(key)
   +exists(key)
-  +delete(key)
+  +remove(key)
 }
 
 note right of ConcurrentStorageDecorator
-  **Double-Checked Locking for Reads:**
-  1. Check if key exists (e.g., in L1 cache). If so, return.
-  2. **Acquire lock.**
-  3. Check again if key exists. If so, release lock and return.
-  4. Read data from wrapped backend (e.g., from L2 cache).
-  5. Write data to cache if needed (promote to L1).
-  6. **Release lock.**
-  7. Return data.
+  **Decorator for L1 Cache**
+  The decorator wraps the shared
+  `InMemoryBackend` to serialize
+  access from parallel workers,
+  ensuring the L1 cache is thread-safe.
 end note
 
-ConcurrentStorageDecorator o-- "1" HDF5Backend : wraps
+ConcurrentStorageDecorator o-- "1" InMemoryBackend : wraps
 
 @enduml

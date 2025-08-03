@@ -320,33 +320,35 @@ This phase executes the main workflow by iteratively building the Merkle DAG of 
 
 ## 4. Caching and Metadata
 
-The framework's caching system is designed to ensure both computational efficiency and the persistent storage of rich metadata for every task. All data and metadata are stored in a single HDF5 file, indexed by the **Provenance Hash** of each unique computational task.
+The framework's caching system is designed to ensure both computational efficiency and the persistent storage of rich metadata for every task. All data and metadata for a single result are stored in an individual `.mat` file, indexed by the **Provenance Hash** of that unique computational task.
 
-### 4.1. HDF5 Storage Architecture
+### 4.1. File-Based Storage Architecture
 
-The cache is organized around a "group-per-hash" model. Each unique **Provenance Hash** corresponds to a single **group** within the HDF5 file, which acts as a container for everything related to that specific computation.
+The cache is organized around a "file-per-hash" model. Each unique **Provenance Hash** corresponds to a single `.mat` file (e.g., `a1b2c3d4....mat`), which acts as a container for everything related to that specific computation.
 
-* **Data Outputs**: Primary data products are stored as individual **datasets**.
-* **Task Metadata**: A single, static dataset named `provenance` will be created within each hash group. This dataset will store a JSON string containing all the information required to reconstruct the task's identity and its position in the dependency graph, including its full input provenance.
-* **Run Telemetry**: All historical metrics and telemetry for every execution of the task are stored within a separate, appendable **dataset of JSON strings** named `telemetry`.
+Inside each `.mat` file, the data is organized into three distinct top-level variables:
 
-### 4.2. HDF5 Structure for a Cached Task
+* **`outputs` (struct)**: A struct containing the primary data products from the stage function. Each field in the struct corresponds to a named output (e.g., `outputs.U`, `outputs.S`).
+* **`provenance` (struct)**: A single, static struct containing all the information required to reconstruct the task's identity and its position in the dependency graph.
+* **`telemetry` (cell array of structs)**: A cell array where each element is a struct containing the historical metrics for a single execution of this task. This allows a complete performance history to be maintained.
 
-This updated structure clearly separates the static, task-defining metadata from the dynamic, run-specific telemetry.
+### 4.2. `.mat` File Structure for a Cached Task
+
+This structure clearly separates the data payload from the static provenance and the dynamic, run-specific telemetry.
 
 ```text
-/ (HDF5 root)
-└── a1b2c3d4.../ (Group named with the Provenance Hash)
-    ├── U (Dataset - data payload)
-    ├── S (Dataset - data payload)
-    ├── V (Dataset - data payload)
-    ├── provenance (Dataset - single JSON string)
-    └── telemetry (Appendable Dataset of JSON strings)
+a1b2c3d4...mat
+├── outputs (struct)
+│   ├── U (double array)
+│   ├── S (double array)
+│   └── V (double array)
+├── provenance (struct)
+└── telemetry (1xN cell array of structs)
 ```
 
-### 4.3. Task Metadata Content
+### 4.3. Provenance Metadata Content
 
-The `provenance` dataset will contain a single JSON string with the following structure:
+The `provenance` variable will contain a struct with the following fields:
 
 ```json
 {
@@ -360,23 +362,15 @@ The `provenance` dataset will contain a single JSON string with the following st
 }
 ```
 
-This design ensures that the static provenance information, which is a component of the hash itself, is stored once and is immutable. The run-specific metrics are stored in a separate, appendable dataset. This is a more robust and conceptually correct approach.
-
-> **Note**: This implementation is a pragmatic design choice for the initial release. A truly cryptographic reverse-link would require a more complex hashing algorithm that is aware of downstream dependencies. This more robust approach is being considered for a future release. For details, see [Future Considerations: Cryptographic Reverse-Linking](#future-considerations-cryptographic-reverse-linking).
-
-#### Future Considerations: Cryptographic Reverse-Linking
-
-The current implementation uses a pragmatic approach for reverse-traversal by explicitly storing the hashes of a task's parents in its metadata. While this is efficient and sufficient for the initial release, it is not cryptographically verifiable.
-
-A more robust and tamper-proof solution would involve modifying the core hashing algorithm to incorporate a cryptographic link to downstream consumers. This would require a significant architectural change to move beyond a simple Merkle DAG.
-
-The proposed approach is to embed a hash of the "downstream recipe" into the upstream node's hash calculation. This would ensure that any change to a consuming stage's dependency recipe would invalidate the upstream producer's hash, providing a tamper-proof chain of provenance in both directions. This advanced hashing model is deferred to a later release to focus on stabilizing the core forward-only execution engine.
+This ensures that the static provenance information is stored once and is immutable.
 
 ### 4.4. Telemetry and Cost Metrics
 
-After **every** execution of a task, whether it succeeds or fails, a new telemetry record is generated and stored. This is achieved by creating a MATLAB `struct` with all available information, serializing it to a JSON string, and appending it to the `metadata` dataset.
+After **every** execution of a task (whether it was a cache miss or a re-run of a `memory_only` task), a new telemetry record is generated and stored.
 
-This "self-describing record" approach is highly resilient to changes, as new fields can be added in the future without invalidating older records. Standard telemetry fields include:
+The `FileBackend` achieves this by loading the existing `.mat` file, appending the new telemetry record to the `telemetry` cell array in memory, and then overwriting the file with the updated contents. This read-modify-write cycle is an atomic operation that guarantees the integrity of the telemetry log.
+
+Standard telemetry fields include:
 
 * `timestamp`
 * `status` ('SUCCESS' or 'FAILURE')
@@ -386,109 +380,83 @@ This "self-describing record" approach is highly resilient to changes, as new fi
 
 ### 4.5. Multi-Level Cache Resolution
 
-When the orchestrator needs to resolve a dependency, it checks the cache and identifies one of three states:
+The `StorageManager` and `Executor` work together to resolve dependencies. When the `Executor` needs an input, it asks the `StorageManager` to `load(hash)`. The `StorageManager` will:
 
-1. **Full Miss ❌**: The group corresponding to the `Provenance Hash` does not exist.
-    * **Meaning**: This computation has never been run.
-    * **Action**: Execute the stage function. Upon completion, create the group, append the new metadata record, and save the data outputs if their storage policy is `'persistent'`.
+1. Check the L1 `InMemoryBackend`. If the hash exists, it returns the `outputs` struct directly.
+2. If not in L1, it checks the L2 `FileBackend`. If the file `hash.mat` exists, it loads the file, extracts the `outputs` struct, promotes it to the L1 cache, and returns it.
+3. If the file does not exist, it throws a `DataNotFound` error, signaling a **Full Miss** to the `Executor`.
 
-2. **Metadata Hit ℹ️**: The group exists, but the required output dataset is **not** present within it (because its policy was `memory_only` on a previous run).
-    * **Meaning**: The computation was run before, and its historical metrics are available, but the data payload is not.
-    * **Action**: This is treated as a **data miss**. The stage function is re-executed to regenerate the data. A new metadata record for this latest run is appended to the history.
-
-3. **Data Hit ✅**: The group exists, **and** the required output dataset is present.
-    * **Meaning**: The computation has been run and its results were persisted.
-    * **Action**: Load the data directly from the dataset and skip execution entirely.
-
-> **Note:** Remember to reconcile this with the storage system: Replace the `flag = exists(key)` method in the IStorageBackend with `status = check(key, required_outputs)` and modify `write(key, outputs, metadata, storage_policies)`.
+This ensures that the `Executor` only ever receives the data payload it needs, while the underlying storage system manages the rich metadata automatically.
 
 ## 5. The Storage System
 
-The storage system is designed as a **two-tier architecture** to provide both high performance via in-memory caching and data integrity via persistent on-disk storage. The architecture strictly separates the caching logic from the persistence mechanism, allowing different storage backends to be used in the future without altering the core pipeline engine.
+The storage system is designed as a **two-tier architecture** to provide both high performance via in-memory caching and data integrity via persistent on-disk storage. The architecture strictly separates the caching logic from the persistence mechanism. Each component (`StorageManager`, `FileBackend`, `InMemoryBackend`, `ConcurrentStorageDecorator`) is instantiated with a dedicated logger instance to provide detailed operational telemetry.
 
-### 5.1. Storage System Diagram
-
-The following diagram illustrates the main components and relationships in the storage subsystem:
-
-```plantuml
-!include diagrams/storage_system.puml
-```
-
-The following is the old storage diagram:
-
-```plantuml
-!include diagrams/storage_old.puml
-```
-
-### 5.2. Architectural Overview
+### 5.1. Architectural Overview
 
 The system is composed of three primary abstractions:
 
-1. **The `StorageManager` (Orchestrator):** This component is the single point of contact for the `Executor`. It does not handle storage itself but orchestrates the flow of data between two specialized backend instances, both of which implement the same `IStorageBackend` interface.
+1. **The `StorageManager`:** This component is the single point of contact for the `Executor`. It orchestrates the flow of data between the L1 and L2 backends.
 
-2. **The L1 `IStorageBackend` (In-Memory Store):** This is a concrete implementation of the backend interface that manages the fast, volatile in-memory cache (e.g., `InMemoryBackend`).
+2. **The L1 `IStorageBackend` (In-Memory Store):** A concrete implementation (`InMemoryBackend`) that manages the fast, volatile, and shared in-memory cache for the duration of a single pipeline run.
 
-3. **The L2 `IStorageBackend` (Persistent Store):** This is another concrete implementation that manages the slow, durable, on-disk store (e.g., `HDF5Backend`).
+3. **The L2 `IStorageBackend` (Persistent Store):** A concrete implementation (`FileBackend`) that manages the durable, on-disk store. Each result is saved as an individual `.mat` file in a designated output directory, using its `ProvenanceHash` as the filename.
 
 The `Executor` communicates only with the `StorageManager`, which delegates commands to the appropriate L1 or L2 backend.
 
-### 5.3. The StorageManager API and Logic
+```plantuml
+!include diagrams/storage_architecture.puml
+```
 
-The `StorageManager` is instantiated at the start of a run with two configured `IStorageBackend` instances (one for L1, one for L2).
+### 5.2. The StorageManager API and Logic
+
+The `StorageManager` is instantiated at the start of a run with two configured `IStorageBackend` instances (one for L1, one for L2). Its API is minimal, exposing only the methods required by the `Executor`.
 
 * **`data = load(hash)`:** This is the primary data retrieval method.
-    1. It first calls `exists(hash)` on the **L1 backend**. If true (**cache hit**), it calls `read(hash)` on the L1 backend and returns the data.
-    2. If the data is not in L1 (**cache miss**), the manager calls `read(hash)` on the **L2 backend**.
-    3. The retrieved data is then **promoted** by calling `write(hash, data)` on the **L1 backend** before being returned.
+    1. It first calls `exists(hash)` on the L1 backend. If true (**cache hit**), it calls `read(hash)` and returns the data.
+    2. If the data is not in L1 (**cache miss**), the manager calls `read(hash)` on the L2 backend.
+    3. The retrieved data is then **promoted** by calling `write(hash, data)` on the L1 backend before being returned.
 
-* **`cache(hash, data)`:** This method writes a result to the L1 cache by calling `write(hash, data)` on the **L1 backend**.
+* **`cache(hash, data)`:** This method writes a result to the L1 cache by calling `write(hash, data)` on the L1 backend.
 
 * **`persist(hash)`:** This method promotes data from L1 to L2.
-    1. It calls `read(hash)` on the **L1 backend** to get the data.
-    2. It then calls `write(hash, data)` on the **L2 backend**.
+    1. It calls `read(hash)` on the L1 backend to get the data.
+    2. It then calls `write(hash, data)` on the L2 backend.
 
-### 5.4. The IStorageBackend Interface
+### 5.3. The IStorageBackend Interface
 
-This defines a strict contract for **any** storage technology—whether in-memory or on-disk—to be compliant with the framework.
+This defines a strict contract for any storage technology to be compliant with the framework.
 
-* **Interface Definition:** An `IStorageBackend` must implement the following methods:
-  * `write(key, data)`: Writes a data object, indexed by its key.
-  * `data = read(key)`: Retrieves a data object.
-  * `flag = exists(key)`: Returns `true` if the key exists.
-  * `delete(key)`: Removes a key and its associated data.
+* **Interface Definition:** An `IStorageBackend` must implement:
+  * `write(key, data)`
+  * `data = read(key)`
+  * `flag = exists(key)`
+  * `remove(key)`
 
-### 5.5. Concurrency and Scalability
+### 5.4. Concurrency and Scalability
 
-To support parallel execution, the storage system must be thread-safe. This is achieved without modifying the core storage backends by using the **Decorator Pattern**, which allows for adding new behaviors (like locking) to existing objects dynamically.
+The storage system is designed for high-throughput parallel execution by separating the concurrency strategies for the L1 and L2 caches.
 
-#### Handling Concurrency with Decorators
+#### L1 Cache (In-Memory): Concurrency via Decorator
 
-To support parallel execution, the storage system must be thread-safe. This is achieved without modifying the core storage backends by using the **Decorator Pattern**, which allows for adding new behaviors (like locking) to existing objects dynamically.
-
-A generic `ConcurrentStorageDecorator` can be wrapped around any `IStorageBackend` instance to make it thread-safe. This decorator's only responsibility is to acquire a lock before an operation and release it afterward.
-
-To prevent race conditions where multiple threads attempt to read from the L2 cache simultaneously for the same missing key, the decorator must implement a **double-checked locking** pattern for read operations. This ensures the expensive L2 read is only performed once.
+The `InMemoryBackend` is a single object shared by all parallel workers. To ensure thread-safety, the `InMemoryBackend` instance **must** be wrapped in the `ConcurrentStorageDecorator`. This decorator uses an internal mutex to serialize all access to the shared `containers.Map`, guaranteeing the integrity of the in-memory cache.
 
 ```plantuml
 !include diagrams/storage_concurrency.puml
 ```
 
-#### Achieving High Throughput with Sharding
+#### L2 Cache (Persistent Files): Concurrency by Design
 
-For very high I/O workloads, a single persistent file can become a bottleneck. **Sharding** addresses this by distributing data across multiple files. A `MultiShardHandler` can manage this distribution. Because it also implements the `IStorageBackend` interface, the same `ConcurrentStorageDecorator` can be used to make it thread-safe, with each shard being locked independently.
+The `FileBackend` is **inherently thread-safe for writes within this framework**. This is because every unique computational task is identified by a unique `ProvenanceHash`. Since each task's result is saved to a file named after its hash (e.g., `a1b2c3d4....mat`), no two workers will ever attempt to write to the same file path simultaneously. This design completely avoids file I/O bottlenecks and allows for maximum parallel throughput to the persistent store without requiring any in-process locking at the L2 level.
 
-```plantuml
-!include diagrams/storage_sharding.puml
-```
+### 5.5. Garbage Collection
 
-### 5.6. Garbage Collection
-
-The garbage collection utility operates directly on the **L2 `IStorageBackend` instance** held by the `StorageManager`.
+The garbage collection utility operates directly on the L2 `FileBackend`.
 
 * **API:** `pipeline.gc(config)`
 * **Algorithm (Mark and Sweep):**
-  * **Mark:** The utility first calculates the complete set of all "live" Provenance Hashes that are reachable from the provided pipeline configuration.
-  * **Sweep:** It then iterates through all keys in the `IStorageBackend` instance. For any key that is not in the "live" set, it calls the `backend.delete(key)` method to reclaim storage space.
+  * **Mark:** The utility first calculates the complete set of all "live" `ProvenanceHashes` that are reachable from the provided pipeline configuration.
+  * **Sweep:** It then iterates through all `.mat` files in the output directory. For any file whose name (the hash) is not in the "live" set, it calls the `backend.remove(key)` method to delete the file and reclaim storage space.
 
 ---
 
