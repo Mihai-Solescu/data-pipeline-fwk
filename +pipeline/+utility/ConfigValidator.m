@@ -109,7 +109,7 @@ classdef ConfigValidator < handle
             % Arguments:
             %   config - The configuration struct to validate
             
-            required_fields = {'stages', 'params', 'output_filename'};
+            required_fields = {'stages', 'params', 'output_directory'};
             
             for i = 1:length(required_fields)
                 field = required_fields{i};
@@ -133,10 +133,10 @@ classdef ConfigValidator < handle
                     'config.params must be a struct'));
             end
             
-            if ~ischar(config.output_filename) && ~isstring(config.output_filename)
-                obj.logger.fatal('pipeline:ConfigValidator:InvalidFieldType: config.output_filename must be a string or char array, but got %s', class(config.output_filename));
+            if ~ischar(config.output_directory) && ~isstring(config.output_directory)
+                obj.logger.fatal('pipeline:ConfigValidator:InvalidFieldType: config.output_directory must be a string or char array, but got %s', class(config.output_directory));
                 throw(MException('pipeline:ConfigValidator:InvalidFieldType', ...
-                    'config.output_filename must be a string or char array'));
+                    'config.output_directory must be a string or char array'));
             end
         end
         
@@ -192,7 +192,7 @@ classdef ConfigValidator < handle
             % Arguments:
             %   config - The configuration struct to validate
             
-            expected_top_level = {'stages', 'params', 'output_filename', 'logging', ...
+            expected_top_level = {'stages', 'params', 'output_directory', 'logging', ...
                                   'error_mode', 'num_workers'};
             actual_fields = fieldnames(config);
             

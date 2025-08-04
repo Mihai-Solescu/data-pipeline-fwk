@@ -4,7 +4,7 @@ function config = example_config()
     config = struct();
     
     % Required top-level fields
-    config.output_filename = 'example_output.h5';
+    config.output_directory = 'example_output.h5';
     
     % Parameter space definition
     config.params = struct();

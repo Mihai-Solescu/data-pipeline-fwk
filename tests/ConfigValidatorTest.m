@@ -150,7 +150,7 @@ classdef ConfigValidatorTest < matlab.unittest.TestCase
             % Test missing stages field
             config = struct();
             config.params = struct('globals', struct(), 'grid', struct());
-            config.output_filename = 'output.h5';
+            config.output_directory = 'output.h5';
             
             testCase.verifyError(@() testCase.validator.validateBasicConfig(config), ...
                 'pipeline:ConfigValidator:MissingRequiredField', ...
@@ -161,7 +161,7 @@ classdef ConfigValidatorTest < matlab.unittest.TestCase
             % Test missing params field
             config = struct();
             config.stages = struct();
-            config.output_filename = 'output.h5';
+            config.output_directory = 'output.h5';
             
             testCase.verifyError(@() testCase.validator.validateBasicConfig(config), ...
                 'pipeline:ConfigValidator:MissingRequiredField', ...
@@ -169,14 +169,14 @@ classdef ConfigValidatorTest < matlab.unittest.TestCase
         end
         
         function testValidateSurfaceFields_MissingOutputFilename(testCase)
-            % Test missing output_filename field
+            % Test missing output_directory field
             config = struct();
             config.stages = struct();
             config.params = struct('globals', struct(), 'grid', struct());
             
             testCase.verifyError(@() testCase.validator.validateBasicConfig(config), ...
                 'pipeline:ConfigValidator:MissingRequiredField', ...
-                'Should reject config missing output_filename field');
+                'Should reject config missing output_directory field');
         end
         
         function testValidateSurfaceFields_StagesNotStruct(testCase)
@@ -184,7 +184,7 @@ classdef ConfigValidatorTest < matlab.unittest.TestCase
             config = struct();
             config.stages = 'invalid';
             config.params = struct('globals', struct(), 'grid', struct());
-            config.output_filename = 'output.h5';
+            config.output_directory = 'output.h5';
             
             testCase.verifyError(@() testCase.validator.validateBasicConfig(config), ...
                 'pipeline:ConfigValidator:InvalidFieldType', ...
@@ -196,7 +196,7 @@ classdef ConfigValidatorTest < matlab.unittest.TestCase
             config = struct();
             config.stages = struct();
             config.params = 'invalid';
-            config.output_filename = 'output.h5';
+            config.output_directory = 'output.h5';
             
             testCase.verifyError(@() testCase.validator.validateBasicConfig(config), ...
                 'pipeline:ConfigValidator:InvalidFieldType', ...
@@ -204,15 +204,15 @@ classdef ConfigValidatorTest < matlab.unittest.TestCase
         end
         
         function testValidateSurfaceFields_OutputFilenameNotString(testCase)
-            % Test when output_filename is not a string
+            % Test when output_directory is not a string
             config = struct();
             config.stages = struct();
             config.params = struct('globals', struct(), 'grid', struct());
-            config.output_filename = 123;
+            config.output_directory = 123;
             
             testCase.verifyError(@() testCase.validator.validateBasicConfig(config), ...
                 'pipeline:ConfigValidator:InvalidFieldType', ...
-                'Should reject non-string output_filename');
+                'Should reject non-string output_directory');
         end
         
         function testValidateParameterSpace_MissingGlobals(testCase)
@@ -220,7 +220,7 @@ classdef ConfigValidatorTest < matlab.unittest.TestCase
             config = struct();
             config.stages = struct();
             config.params = struct('grid', struct());
-            config.output_filename = 'output.h5';
+            config.output_directory = 'output.h5';
             
             testCase.verifyError(@() testCase.validator.validateBasicConfig(config), ...
                 'pipeline:ConfigValidator:MissingRequiredField', ...
@@ -232,7 +232,7 @@ classdef ConfigValidatorTest < matlab.unittest.TestCase
             config = struct();
             config.stages = struct();
             config.params = struct('globals', struct());
-            config.output_filename = 'output.h5';
+            config.output_directory = 'output.h5';
             
             testCase.verifyError(@() testCase.validator.validateBasicConfig(config), ...
                 'pipeline:ConfigValidator:MissingRequiredField', ...
@@ -244,7 +244,7 @@ classdef ConfigValidatorTest < matlab.unittest.TestCase
             config = struct();
             config.stages = struct();
             config.params = struct('globals', 'invalid', 'grid', struct());
-            config.output_filename = 'output.h5';
+            config.output_directory = 'output.h5';
             
             testCase.verifyError(@() testCase.validator.validateBasicConfig(config), ...
                 'pipeline:ConfigValidator:InvalidFieldType', ...
@@ -256,7 +256,7 @@ classdef ConfigValidatorTest < matlab.unittest.TestCase
             config = struct();
             config.stages = struct();
             config.params = struct('globals', struct(), 'grid', 'invalid');
-            config.output_filename = 'output.h5';
+            config.output_directory = 'output.h5';
             
             testCase.verifyError(@() testCase.validator.validateBasicConfig(config), ...
                 'pipeline:ConfigValidator:InvalidFieldType', ...
@@ -270,7 +270,7 @@ classdef ConfigValidatorTest < matlab.unittest.TestCase
             config.params = struct();
             config.params.globals = struct('param1', 1, 'param2', 2);
             config.params.grid = struct('param2', [1, 2, 3], 'param3', [4, 5, 6]);
-            config.output_filename = 'output.h5';
+            config.output_directory = 'output.h5';
             
             testCase.verifyError(@() testCase.validator.validateBasicConfig(config), ...
                 'pipeline:ConfigValidator:ParameterNameCollision', ...
@@ -338,7 +338,7 @@ classdef ConfigValidatorTest < matlab.unittest.TestCase
             config = struct();
             config.stages = struct();
             config.params = struct('globals', struct(), 'grid', struct());
-            config.output_filename = '';
+            config.output_directory = '';
             
             testCase.validator.validateBasicConfig(config);
             testCase.verifyTrue(true, 'Should accept empty but valid structs');
@@ -347,10 +347,10 @@ classdef ConfigValidatorTest < matlab.unittest.TestCase
         function testValidateBasicConfig_StringVsChar(testCase)
             % Test that both string and char arrays are accepted
             config1 = ConfigValidatorTest.createValidConfig();
-            config1.output_filename = 'output.h5'; % char array
+            config1.output_directory = 'output.h5'; % char array
             
             config2 = ConfigValidatorTest.createValidConfig();
-            config2.output_filename = string('output.h5'); % string
+            config2.output_directory = string('output.h5'); % string
             
             testCase.validator.validateBasicConfig(config1);
             testCase.validator.validateBasicConfig(config2);
@@ -422,8 +422,8 @@ classdef ConfigValidatorTest < matlab.unittest.TestCase
                     'generate_config should include stages');
                 testCase.verifyTrue(isfield(config, 'params'), ...
                     'generate_config should include params');
-                testCase.verifyTrue(isfield(config, 'output_filename'), ...
-                    'generate_config should include output_filename');
+                testCase.verifyTrue(isfield(config, 'output_directory'), ...
+                    'generate_config should include output_directory');
                 
                 % Verify parameter structure
                 testCase.verifyTrue(isfield(config.params, 'globals'), ...
@@ -637,7 +637,7 @@ classdef ConfigValidatorTest < matlab.unittest.TestCase
             config.params = struct();
             config.params.globals = struct();
             config.params.grid = struct();
-            config.output_filename = 'output.h5';
+            config.output_directory = 'output.h5';
         end
     end % methods (Static, Access = private)
     

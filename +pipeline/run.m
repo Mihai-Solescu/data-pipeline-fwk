@@ -1,6 +1,8 @@
 function run(config)
     % Main entry point to the framework. Validates configuration,
     % builds the stage graph, and initializes the logging system.
+
+    %% Initalization
     
     scriptFolder = fileparts(mfilename('fullpath')); % Get the folder of this script
     projectRoot = fullfile(scriptFolder, '..');      % Navigate to the project root
@@ -51,6 +53,22 @@ function run(config)
         logger.fatal('pipeline:run:InitializationFailed: Pipeline initialization failed: %s', ME.message);
         rethrow(ME);
     end
+
+    %% Phase 1: Backwards Pass
+
+    % Step 1: Initialize the ParameterManager and FileManager
+    try
+        parameter_manager = pipeline.ParameterManager(config, logger);
+        logger.debug('pipeline:run:ParameterManagerInitialized: ParameterManager initialized successfully.');
+
+        file_manager = pipeline.storage.FileManager(config.output_directory, logger);
+        logger.debug('pipeline:run:FileManagerInitialized: FileManager initialized successfully.');
+    catch ME
+        logger.fatal('pipeline:run:ParameterManagerInitFailed: Failed to initialize ParameterManager: %s', ME.message);
+        rethrow(ME);
+    end
+
+    % Step 2: 
 
 end
 
