@@ -38,7 +38,7 @@ classdef ParameterManagerTest < matlab.unittest.TestCase
             config_params.grid.param2 = [10, 20, 30];
             
             % Act
-            pm = pipeline.ParameterManager(config_params, testCase.test_logger);
+            pm = pipeline.internal.ParameterManager(config_params, testCase.test_logger);
             runs = pm.getApprovedRuns();
             
             % Assert
@@ -75,7 +75,7 @@ classdef ParameterManagerTest < matlab.unittest.TestCase
             config_params.grid = struct('rank', [5, 10]);
             
             % Act
-            pm = pipeline.ParameterManager(config_params, testCase.test_logger);
+            pm = pipeline.internal.ParameterManager(config_params, testCase.test_logger);
             runs = pm.getApprovedRuns();
             
             % Assert
@@ -100,7 +100,7 @@ classdef ParameterManagerTest < matlab.unittest.TestCase
             config_params.filter = @(p, G) mod(p.value, 2) == 0;
             
             % Act
-            pm = pipeline.ParameterManager(config_params, testCase.test_logger);
+            pm = pipeline.internal.ParameterManager(config_params, testCase.test_logger);
             runs = pm.getApprovedRuns();
             
             % Assert
@@ -120,7 +120,7 @@ classdef ParameterManagerTest < matlab.unittest.TestCase
             config_params.grid.rank = [5, 10, 15];
             config_params.grid.method = {'svd', 'eig'};
             
-            pm = pipeline.ParameterManager(config_params, testCase.test_logger);
+            pm = pipeline.internal.ParameterManager(config_params, testCase.test_logger);
             
             % Act - Project onto subset of parameters
             effective_params = {'rank', 'dt'};
@@ -151,7 +151,7 @@ classdef ParameterManagerTest < matlab.unittest.TestCase
             config_params.globals = struct('dt', 0.001);
             config_params.grid = struct('rank', [5, 10]);
             
-            pm = pipeline.ParameterManager(config_params, testCase.test_logger);
+            pm = pipeline.internal.ParameterManager(config_params, testCase.test_logger);
             
             % Act
             projected_tasks = pm.getProjectedTasks({});
@@ -173,7 +173,7 @@ classdef ParameterManagerTest < matlab.unittest.TestCase
             config_params.grid = struct(); % Empty grid
             
             % Act
-            pm = pipeline.ParameterManager(config_params, testCase.test_logger);
+            pm = pipeline.internal.ParameterManager(config_params, testCase.test_logger);
             runs = pm.getApprovedRuns();
             
             % Assert
@@ -196,7 +196,7 @@ classdef ParameterManagerTest < matlab.unittest.TestCase
             
             % Act & Assert
             % Should not throw error but should log warning
-            pm = pipeline.ParameterManager(config_params, testCase.test_logger);
+            pm = pipeline.internal.ParameterManager(config_params, testCase.test_logger);
             runs = pm.getApprovedRuns();
             
             testCase.verifyEqual(length(runs), 0, 'Should have no approved runs');
@@ -212,7 +212,7 @@ classdef ParameterManagerTest < matlab.unittest.TestCase
             config_params.filter = 'not_a_function'; % Invalid
             
             % Act & Assert
-            testCase.verifyError(@() pipeline.ParameterManager(config_params, testCase.test_logger), ...
+            testCase.verifyError(@() pipeline.internal.ParameterManager(config_params, testCase.test_logger), ...
                 'pipeline:ParameterManager:InvalidFilterFunction');
         end
         
@@ -225,7 +225,7 @@ classdef ParameterManagerTest < matlab.unittest.TestCase
             config_params.grid = struct('dt', [0.001, 0.002]); % Collision!
             
             % Act & Assert
-            testCase.verifyError(@() pipeline.ParameterManager(config_params, testCase.test_logger), ...
+            testCase.verifyError(@() pipeline.internal.ParameterManager(config_params, testCase.test_logger), ...
                 'pipeline:ParameterManager:ParameterNameCollision');
         end
         
@@ -243,7 +243,7 @@ classdef ParameterManagerTest < matlab.unittest.TestCase
             config_params.filter = @(p, G) p.rank >= max(G.rank) / 2;
             
             % Act
-            pm = pipeline.ParameterManager(config_params, testCase.test_logger);
+            pm = pipeline.internal.ParameterManager(config_params, testCase.test_logger);
             runs = pm.getApprovedRuns();
             
             % Assert
@@ -267,7 +267,7 @@ classdef ParameterManagerTest < matlab.unittest.TestCase
             config_params.grid.method = {'svd', 'eig'};
             config_params.grid.tolerance = [1e-6, 1e-8];
             
-            pm = pipeline.ParameterManager(config_params, testCase.test_logger);
+            pm = pipeline.internal.ParameterManager(config_params, testCase.test_logger);
             
             % Act - Project onto mixed types
             effective_params = {'use_gpu', 'method'};
@@ -306,7 +306,7 @@ classdef ParameterManagerTest < matlab.unittest.TestCase
             
             % Act
             tic;
-            pm = pipeline.ParameterManager(config_params, testCase.test_logger);
+            pm = pipeline.internal.ParameterManager(config_params, testCase.test_logger);
             construction_time = toc;
             
             tic;
@@ -334,7 +334,7 @@ classdef ParameterManagerTest < matlab.unittest.TestCase
             config_params.globals = struct('dt', 0.001);
             config_params.grid = struct('rank', [5, 10]);
             
-            pm = pipeline.ParameterManager(config_params, testCase.test_logger);
+            pm = pipeline.internal.ParameterManager(config_params, testCase.test_logger);
             
             % Act & Assert
             testCase.verifyError(@() pm.getProjectedTasks({'nonexistent_param'}), ...
@@ -352,7 +352,7 @@ classdef ParameterManagerTest < matlab.unittest.TestCase
             config_params.filter = @(p, G) p.nonexistent_field > 0;
             
             % Act & Assert
-            testCase.verifyError(@() pipeline.ParameterManager(config_params, testCase.test_logger), ...
+            testCase.verifyError(@() pipeline.internal.ParameterManager(config_params, testCase.test_logger), ...
                 'pipeline:ParameterManager:FilterFunctionError');
         end
         
@@ -367,7 +367,7 @@ classdef ParameterManagerTest < matlab.unittest.TestCase
             config_params.filter = @(p, G) 'not_logical';
             
             % Act & Assert
-            testCase.verifyError(@() pipeline.ParameterManager(config_params, testCase.test_logger), ...
+            testCase.verifyError(@() pipeline.internal.ParameterManager(config_params, testCase.test_logger), ...
                 'pipeline:ParameterManager:FilterFunctionError');
         end
         
@@ -382,7 +382,7 @@ classdef ParameterManagerTest < matlab.unittest.TestCase
             config_params.grid.precision = 'double'; % Single string
             
             % Act
-            pm = pipeline.ParameterManager(config_params, testCase.test_logger);
+            pm = pipeline.internal.ParameterManager(config_params, testCase.test_logger);
             runs = pm.getApprovedRuns();
             
             % Assert
@@ -412,7 +412,7 @@ classdef ParameterManagerTest < matlab.unittest.TestCase
             config_params.filter = @(p, G) mod(p.rank, 2) == 1 && p.tolerance >= 1e-6;
             
             % Act
-            pm = pipeline.ParameterManager(config_params, testCase.test_logger);
+            pm = pipeline.internal.ParameterManager(config_params, testCase.test_logger);
             runs = pm.getApprovedRuns();
             
             % Assert
@@ -445,7 +445,7 @@ classdef ParameterManagerTest < matlab.unittest.TestCase
                 (~p.use_adaptive || ~strcmp(p.solver, 'euler'));
             
             % Act
-            pm = pipeline.ParameterManager(config_params, testCase.test_logger);
+            pm = pipeline.internal.ParameterManager(config_params, testCase.test_logger);
             runs = pm.getApprovedRuns();
             
             % Assert
@@ -483,7 +483,7 @@ classdef ParameterManagerTest < matlab.unittest.TestCase
                 strcmp(p.precision, 'double') && p.debug_level <= 1;
             
             % Act
-            pm = pipeline.ParameterManager(config_params, testCase.test_logger);
+            pm = pipeline.internal.ParameterManager(config_params, testCase.test_logger);
             runs = pm.getApprovedRuns();
             
             % Assert
@@ -519,7 +519,7 @@ classdef ParameterManagerTest < matlab.unittest.TestCase
                 p.batch_size <= 64 && p.learning_rate <= 0.01;
             
             % Act
-            pm = pipeline.ParameterManager(config_params, testCase.test_logger);
+            pm = pipeline.internal.ParameterManager(config_params, testCase.test_logger);
             runs = pm.getApprovedRuns();
             
             % Assert
@@ -559,7 +559,7 @@ classdef ParameterManagerTest < matlab.unittest.TestCase
                 (p.problem_size < 1000 || p.parallel_workers >= 2);
             
             % Act
-            pm = pipeline.ParameterManager(config_params, testCase.test_logger);
+            pm = pipeline.internal.ParameterManager(config_params, testCase.test_logger);
             runs = pm.getApprovedRuns();
             
             % Assert - verify all constraints are satisfied
@@ -612,7 +612,7 @@ classdef ParameterManagerTest < matlab.unittest.TestCase
                 (p.tolerance_multiplier * p.base_tolerance <= 1e-5);
             
             % Act
-            pm = pipeline.ParameterManager(config_params, testCase.test_logger);
+            pm = pipeline.internal.ParameterManager(config_params, testCase.test_logger);
             runs = pm.getApprovedRuns();
             
             % Assert
@@ -657,7 +657,7 @@ classdef ParameterManagerTest < matlab.unittest.TestCase
             config_params.filter = @(p, G) p.feature_level == 4 && p.compatibility <= p.version;
             
             % Act
-            pm = pipeline.ParameterManager(config_params, testCase.test_logger);
+            pm = pipeline.internal.ParameterManager(config_params, testCase.test_logger);
             runs = pm.getApprovedRuns();
             
             % Assert

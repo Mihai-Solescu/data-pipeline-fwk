@@ -1,6 +1,6 @@
 classdef ProvenanceHasherTest < matlab.unittest.TestCase
     % ProvenanceHasherTest provides a comprehensive test suite for the
-    % pipeline.ProvenanceHasher service.
+    % pipeline.internal.ProvenanceHasher service.
     %
     %   It includes:
     %   1. Synthetic tests for 100% coverage of all logic paths.
@@ -157,7 +157,7 @@ classdef ProvenanceHasherTest < matlab.unittest.TestCase
             % Verifies that the hasher throws an error if the .m file is not found.
             config.stages.StageD = struct('function', @non_existent_func);
             [stageGraph, logger] = testCase.createStageGraph(config);
-            hasher = pipeline.ProvenanceHasher(stageGraph, logger);
+            hasher = pipeline.internal.ProvenanceHasher(stageGraph, logger);
             
             task = struct(...
                 'stage_name', 'StageD', ...
@@ -182,7 +182,7 @@ classdef ProvenanceHasherTest < matlab.unittest.TestCase
             testLogger.CommandWindowThreshold = mlog.Level.NONE; % Suppress console output during tests
             
             % Create a simple log capture mechanism using evalc
-            hasher = pipeline.ProvenanceHasher(stageGraph, testLogger);
+            hasher = pipeline.internal.ProvenanceHasher(stageGraph, testLogger);
             
             task = struct(...
                 'stage_name', 'StageD', ...
@@ -324,7 +324,7 @@ classdef ProvenanceHasherTest < matlab.unittest.TestCase
             % Verifies that FunctionNotFound error messages contain expected information
             config.stages.StageD = struct('function', @non_existent_func);
             [stageGraph, logger] = testCase.createStageGraph(config);
-            hasher = pipeline.ProvenanceHasher(stageGraph, logger);
+            hasher = pipeline.internal.ProvenanceHasher(stageGraph, logger);
             
             task = struct(...
                 'stage_name', 'StageD', ...
@@ -458,7 +458,7 @@ classdef ProvenanceHasherTest < matlab.unittest.TestCase
             config.stages.StageC = struct('function', @dummy_func_C, 'inputs', struct('in_A', 'StageA.output', 'in_B', 'StageB.output'));
             
             [stageGraph, logger] = testCase.createStageGraph(config);
-            hasher = pipeline.ProvenanceHasher(stageGraph, logger);
+            hasher = pipeline.internal.ProvenanceHasher(stageGraph, logger);
         end
 
         function [hasher, config] = createHavokHasher(testCase)
@@ -475,7 +475,7 @@ classdef ProvenanceHasherTest < matlab.unittest.TestCase
             rmpath(testPath);
             
             [stageGraph, logger] = testCase.createStageGraph(config);
-            hasher = pipeline.ProvenanceHasher(stageGraph, logger);
+            hasher = pipeline.internal.ProvenanceHasher(stageGraph, logger);
         end
         
         function [stageGraph, logger] = createStageGraph(~, config)

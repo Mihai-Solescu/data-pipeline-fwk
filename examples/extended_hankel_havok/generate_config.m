@@ -5,7 +5,7 @@ function config = generate_config()
     %   config - Structure containing all configuration parameters
 
     %% Output File Configuration
-    config.output_filename = 'havok_modular_results.h5';
+    config.output_directory = 'havok_modular_results.h5';
 
     %% General Configuration
     config.num_workers = 4;  % Number of CPUs to use for parallel processing

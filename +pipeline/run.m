@@ -58,7 +58,7 @@ function run(config)
 
     % Step 1: Initialize the ParameterManager and FileManager
     try
-        parameter_manager = pipeline.ParameterManager(config, logger);
+        parameter_manager = pipeline.internal.ParameterManager(config.params, logger);
         logger.debug('pipeline:run:ParameterManagerInitialized: ParameterManager initialized successfully.');
 
         file_manager = pipeline.storage.FileManager(config.output_directory, logger);
