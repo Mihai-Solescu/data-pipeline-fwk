@@ -1,6 +1,6 @@
 # Architecture Design Document: General-Purpose Scientific Pipeline Framework
 
-**Version:** 0.29.3
+**Version:** 0.30.0
 **Date:** 2025-08-04
 
 ---
@@ -55,7 +55,7 @@ The provenance hashing mechanism relies on being able to locate the source file 
 
 ### 1.3. Output Storage Location
 
-* **`config.output_filename`**: The filename for persistent storage.
+* **`config.output_directory`**: The filename for persistent storage.
 
 ### 1.4. Logging and Error Configuration
 
@@ -281,42 +281,47 @@ The service uses a set of private methods to assemble the three component hashes
 
 ---
 
-## 3. Algorithm Overview
+### The Execution System: A Three-Part Design
 
-The full algorithm integrates configuration validation, progressive parametrization, and the iterative construction of a **Merkle DAG** to ensure efficiency and reproducibility.
+The framework's execution is managed by a trio of components, each with a distinct and focused responsibility: the `ExecutionPlanner`, the `TaskScheduler`, and the `Orchestrator`.
 
-### Phase 1: Initialization & Validation ✅
+#### 1. The `ExecutionPlanner` (The Strategist)
 
-This phase runs once at the beginning of the pipeline to prepare for execution.
+The `ExecutionPlanner` is a stateless service that runs once at the beginning of a pipeline. Its sole purpose is to create a static, comprehensive **Execution Plan**.
 
-1. **Load and Validate Config**: The framework loads the `config` struct, validates its structure, and ensures parameter names do not collide between `globals` and `grid`.
+* **Core Responsibility**: To analyze the `StageGraph`, the parameter space, and the state of the L2 persistent cache to determine the initial status of every potential task in the pipeline.
+* **Algorithm**: It uses a recursive, backward-pass algorithm with memoization to classify every task as `REQUIRED`, `CACHED_PERSISTENT`, or `SKIPPED_UPSTREAM`. As part of this process, it builds the full dependency graph between tasks, populating the `Dependencies` and `Dependents` lists and calculating the `UnsatisfiedDependencyCount` for each `TaskNode`.
+* **Output**: The planner produces two outputs:
+    1. The **`TaskRegistry`**: A `containers.Map` that serves as the complete, static execution plan.
+    2. The **`InitialReadyTasks`**: A cell array of task IDs for all `REQUIRED` tasks whose `UnsatisfiedDependencyCount` is zero. This is the "starting set" of tasks for the `TaskScheduler`.
 
-2. **Generate and Filter Runs**: The full Cartesian product of `config.params.grid` is generated to create a list of all possible final runs. The optional `config.params.filter` function is then applied to produce the definitive **`Approved_Runs` list**, which dictates the scope of the experiment.
+#### 2. The `TaskScheduler` (The Project Manager)
 
-3. **Build and Sort DAG**: The framework parses `config.stages` to build a Directed Acyclic Graph (DAG) of dependencies. It performs a **topological sort** on the graph to get a linear execution order.
+The `TaskScheduler` is a stateful service that takes the static `Execution Plan` and manages its dynamic evolution throughout the run. It is the heart of the dependency management system.
 
-4. **Pre-hash Code**: The framework iterates through all stage functions and pre-computes their **Code Hash** from the respective `.m` files.
+* **Core Responsibility**: To track the state of all `REQUIRED` tasks and efficiently determine which tasks are ready to run next.
+* **Initialization**: The scheduler's constructor is simple and fast. It receives the `TaskRegistry` and the `InitialReadyTasks` list from the planner. It uses the provided list to directly populate its internal `ReadyQueue`. **It performs no initial scanning of its own.**
+* **The "Unlock" Algorithm**: The scheduler's primary job is to react to task completion events. When the Orchestrator notifies it that a task has finished, the scheduler performs a highly efficient, targeted "unlock" operation:
+    1. It looks up the completed task's `Dependents` list.
+    2. For each dependent task, it decrements its `UnsatisfiedDependencyCount`.
+    3. If a dependent's count reaches zero, that task is moved to the `ReadyQueue`.
+* **Public API**:
+  * `task = getNextReadyTask()`: Returns the next available task from the `ReadyQueue`.
+  * `notifyTaskCompletion(completed_task_id)`: The core method called by the Orchestrator to trigger the "unlock" algorithm.
+  * `isDone()`: Returns `true` when the `ReadyQueue` is empty and no more tasks are running.
 
-### Phase 2: Orchestration & Execution (Building the Merkle DAG) 🚀
+#### 3. The `Orchestrator` (The Main Controller)
 
-This phase executes the main workflow by iteratively building the Merkle DAG of results.
+With the planning and scheduling logic encapsulated, the `Orchestrator` becomes a much simpler main loop that directs the overall flow of execution.
 
-1. **Initialize Merkle DAG Representation**: An in-memory `containers.Map` is created. This map will store the computed **nodes** of the Merkle DAG, keyed by their **Provenance Hash**. Each node contains the output data and its associated metadata.
-
-2. **Iterate Through Stages**: The orchestrator loops through the stages in the topologically sorted order from Phase 1.
-
-3. **For Each Stage, Determine its Tasks**:
-    * **A. Identify Relevant Parameter Space 🔬**: The framework determines the minimal set of parameters that affect the current stage by taking the **union** of the stage's own `.params` and the `relevant_parameter_space` from the cached metadata of its inputs.
-    * **B. Generate Unique Tasks via Projection ⚡**: The framework generates the minimal sub-grid of unique tasks by **projecting** the `Approved_Runs` list onto the stage's relevant parameter space. This is an efficient `O(M)` in-memory operation (where `M` is the number of approved runs) that uses a hash map to find the unique set of tasks, ensuring that this overhead is negligible compared to the computational savings.
-
-4. **For Each Task, Compute its Node in the DAG**:
-    * **A. Compute Node's Merkle Hash**: The orchestrator calculates the task's final **Provenance Hash** (its Merkle hash) by assembling its three components:
-        1. The pre-computed **Code Hash**.
-        2. The **Granular Parameter Hash** from the task's specific parameter combination.
-        3. The **Input Hashes**, which are retrieved via fast lookups from the in-memory map of already-computed parent nodes.
-    * **B. Check Cache**: The framework checks for this Provenance Hash in the persistent store and the in-memory map.
-    * **C. Execute (if needed)**: If the hash is not found (a cache "miss"), the stage function is executed.
-    * **D. Add Node to DAG**: The output data and its metadata are stored in the in-memory map under the new Provenance Hash. If required by the storage policy, the data is also written to the persistent store.
+* **Core Responsibility**: To act as the "glue" between the `TaskScheduler` and the `Executor`. It requests ready tasks, submits them for execution, and reports their completion.
+* **Algorithm (The Main Loop)**:
+    1. Initializes the `ExecutionPlanner` and uses its output to initialize the `TaskScheduler`.
+    2. Enters a main loop that continues as long as `!scheduler.isDone()`.
+    3. Inside the loop, it continuously calls `scheduler.getNextReadyTask()` to get work.
+    4. When it receives a task, it submits it to the `Executor` pool via `parfeval`.
+    5. It manages the `Future` objects returned by `parfeval`. When a task completes, the Orchestrator retrieves the result and immediately calls `scheduler.notifyTaskCompletion()` with the ID of the finished task.
+    6. It also handles the pipeline's error mode (`fail_fast` or `resilient`) and provides the final summary report.
 
 ### The `ParameterManager` Service
 
@@ -527,41 +532,6 @@ The framework prioritizes logging all errors before handling them, ensuring crit
 * **Log Before Handling:** All errors caught within `try/catch` blocks (especially in the `Executor`) will be logged using the `mlog.Level.ERROR` or `mlog.Level.FATAL` level, including the full message and stack trace. This is done *before* the framework decides how to proceed based on `config.error_mode`.
 * **Graceful Termination:** Instead of allowing unhandled errors to crash the MATLAB process, the framework will log fatal errors and perform a controlled shutdown. This ensures that resources like file locks are properly released, and the final state of the pipeline is clean and predictable.
 * **Consistency with `config.error_mode`:** This controlled approach allows the `Orchestrator` to reliably respond to job failures according to the `config.error_mode` (`'resilient'` or `'fail_fast'`). The logged fatal error is the signal that triggers this state machine transition.
-
----
-
-## 2.2. The Orchestrator (Stateful Task-Based Scheduler)
-
-The **Orchestrator** is the central coordinating component of the framework. It operates as a stateful, task-based scheduler, and its workflow is as follows:
-
-1. **Initialization:** Loads the configuration object, validates its structure, and generates the list of parameter runs.
-2. **Graph Analysis:** Constructs a dependency graph from `config.stages` and performs a topological sort to create a valid execution plan and detect cycles.
-3. **Task Scheduling:** Operates as a state machine, managing a registry of all jobs and their statuses (`WAITING`, `READY`, `RUNNING`, `COMPLETE`, `FAILED`, `CANCELLED`). It continuously submits `READY` jobs to the **Executor** component (which implements the `IExecutor` interface) for asynchronous execution.
-4. **State Update and Error Handling:** When a job completes, the **Orchestrator** updates the state of all dependent jobs. If a job fails:
-    * It is marked as `FAILED`. The error is logged.
-    * If `config.error_mode` is `'fail_fast'`, the **Orchestrator** terminates the entire pipeline.
-    * If `config.error_mode` is `'resilient'`, the **Orchestrator** traverses the graph downstream from the failed job, marks all its dependents as `CANCELLED`, and continues executing other independent branches.
-5. **Reporting:** At the end of the run, the **Orchestrator** provides a summary report of all job statuses.
-
-### Configuration Validation Routine
-
-Before any pipeline execution begins, the user's configuration undergoes a rigorous, multi-phase validation process. This is performed by dedicated validator components before the `Orchestrator` is created, ensuring the system fails fast on any invalid input. The validation is performed in three phases:
-
-1. **Schema and Structural Validation:** This phase checks the basic "grammar" of the configuration file.
-    * Verifying all required fields are present.
-    * Checking that all values have the correct data type (e.g., stage names are strings, dependencies are in a struct).
-    * Ensuring stage names are unique.
-    * Confirming that function handles for stages point to existing, non-anonymous `.m` files.
-
-2. **Graph Construction and Logical Validation:** This phase checks the "meaning" and integrity of the defined workflow.
-    * The `DependencyGraph` object is constructed from the stage definitions.
-    * The graph's structure is verified to be a valid **Directed Acyclic Graph (DAG)** by attempting a topological sort.
-    * It ensures all dependency recipes refer to stages that exist in the graph.
-    * It confirms that the parameter sweep configuration will result in at least one run.
-
-3. **Environment Validation:** This final phase checks for external prerequisites required for the run.
-    * The existence and licensing of required toolboxes (e.g., Parallel Computing Toolbox).
-    * Write permissions for the specified storage path and log file path.
 
 ---
 

@@ -111,6 +111,59 @@ This class contains the test suite for the `ParameterManager` service.
 * **`testEdgeCaseFilterRemovesAll`**: Verifies that the manager behaves correctly and logs a warning when the filter function removes every single run.
 * **`testErrorOnInvalidFilterHandle`**: Confirms that the constructor throws an `InvalidFilterFunction` error if `config.params.filter` is not a function handle.
 
+### `ExecutionPlannerTest`
+
+This test suite validates the static planning logic. It uses a mock `L2_Backend` to control which tasks are considered "cached" and verifies that the generated plan is correct.
+
+* **`testPlanForFullRun`**:
+  * **Scenario**: The L2 cache is empty.
+  * **Verification**: Verifies that all tasks in the DAG are marked as `REQUIRED` and that the `InitialReadyTasks` list contains all the source nodes of the graph.
+* **`testPlanForIncrementalRun`**:
+  * **Scenario**: A middle stage (e.g., `StageB` in `A->B->C`) is pre-populated in the mock L2 cache.
+  * **Verification**: Verifies that `StageB` is marked `CACHED_PERSISTENT`, `StageA` is marked `SKIPPED_UPSTREAM`, and `StageC` is marked `REQUIRED`.
+* **`testDependencyLinksAndCounts`**:
+  * **Verification**: For a simple DAG, this test inspects the generated `TaskRegistry` to confirm that the `Dependencies`, `Dependents`, and `UnsatisfiedDependencyCount` properties are all set correctly for each `TaskNode`.
+* **`testInitialReadyTasksCorrectness`**:
+  * **Scenario**: A complex DAG where some source nodes are `REQUIRED` and some are `CACHED_PERSISTENT`.
+  * **Verification**: Verifies that the `InitialReadyTasks` list returned by the planner contains only the tasks that are both `REQUIRED` and have an `UnsatisfiedDependencyCount` of zero.
+
+---
+
+### `TaskSchedulerTest`
+
+This suite tests the dynamic dependency unlocking logic in isolation, using a pre-constructed `TaskRegistry` (the output of a planner).
+
+* **`testInitializationWithReadyTasks`**: Verifies that the scheduler's `ReadyQueue` is correctly populated from the `InitialReadyTasks` list provided to its constructor.
+* **`testGetNextReadyTask`**: Verifies that the method correctly returns tasks from the `ReadyQueue` and that the queue is empty after all initial tasks have been retrieved.
+* **`testNotifyCompletionUnlocksDependent`**:
+  * **Scenario**: A simple `A->B` graph where `A` is the only initial ready task.
+  * **Action**: The test calls `getNextReadyTask` (which returns `A`), and then calls `notifyTaskCompletion('A_id')`.
+  * **Verification**: Verifies that task `B` is now in the `ReadyQueue`.
+* **`testIsDoneLogic`**:
+  * **Verification**: Verifies that `isDone()` returns `false` when there are tasks in the `ReadyQueue` or tasks still running, and `true` only when the queue is empty and all tasks are complete.
+
+---
+
+### `OrchestratorTest` (pipeline.run)
+
+This is the final, high-level integration test suite. It tests the main `pipeline.run` function, which acts as the Orchestrator. It uses a real configuration but can use mock versions of the `Executor` or stage functions to simulate different outcomes like failures.
+
+* **`testFullRunExecution`**:
+  * **Scenario**: The persistent cache (L2) is empty.
+  * **Verification**: Verifies that the pipeline runs to completion and that the final state of all tasks is `COMPLETED`.
+* **`testIncrementalRunExecution`**:
+  * **Scenario**: Some persistent results exist in the L2 cache.
+  * **Verification**: Verifies that the `Executor` was **only** called for the tasks that the planner would have marked as `REQUIRED`.
+* **`testFailFastErrorHandling`**:
+  * **Scenario**: A mock stage function is configured to throw an error, and `config.error_mode` is `'fail_fast'`.
+  * **Verification**: Verifies that the pipeline terminates immediately after the first task fails and that the final report shows `FAILED` and `CANCELLED` states correctly.
+* **`testResilientErrorHandling`**:
+  * **Scenario**: A mock stage function in one branch of a DAG throws an error, and `config.error_mode` is `'resilient'`.
+  * **Verification**: Verifies that the failed branch is marked `FAILED` and `CANCELLED`, but that an independent branch of the pipeline runs to completion.
+* **`testGlobalStageSynchronization`**:
+  * **Scenario**: A `'global'` stage depends on the outputs of a preceding `'per_run'` stage.
+  * **Verification**: Verifies that the `global` stage is only executed **once**, and only *after* all of its required `per_run` dependencies have completed.
+
 ## Error and Log Taxonomy
 
 To ensure that the framework's behavior is predictable and debuggable, we use a standardized taxonomy for all custom errors and significant log messages.
@@ -128,6 +181,56 @@ All custom error and log identifiers thrown or logged by the framework must foll
 I've updated and expanded the taxonomy to cover the entire storage system, assigning logs and errors to the specific component responsible for them.
 
 ---
+
+### Execution System Log and Error Taxonomy
+
+This taxonomy is divided by component to clarify where each message originates within the execution engine.
+
+#### `ExecutionPlanner`
+
+These logs relate to the initial, static planning phase where the execution plan is built.
+
+| Identifier | Log Level | Description |
+| :--- | :--- | :--- |
+| `pipeline:ExecutionPlanner:PlannerError` | `FATAL` | A critical, unrecoverable error occurred during the recursive planning process. |
+| `pipeline:ExecutionPlanner:PlanningStarted` | `INFO` | The planner has started the backward-pass analysis of the dependency graph. |
+| `pipeline:ExecutionPlanner:PlanningComplete` | `INFO` | The static execution plan is complete. The log will include a summary of task states (e.g., 500 Required, 250 Cached, 1200 Skipped). |
+| `pipeline:ExecutionPlanner:TaskPlanned` | `DEBUG` | A specific task has been planned. The log will include the task ID and its final static state (`REQUIRED`, `CACHED_PERSISTENT`, etc.). |
+| `pipeline:ExecutionPlanner:DependencyLinkCreated`| `DEBUG` | A dependency link (forward and backward) has been established between two task nodes in the registry. |
+
+---
+
+#### `TaskScheduler`
+
+These logs relate to the dynamic management of the task queue and the "unlocking" of dependencies.
+
+| Identifier | Log Level | Description |
+| :--- | :--- | :--- |
+| `pipeline:TaskScheduler:InvalidState` | `FATAL` | The scheduler encountered an impossible state, such as a dependency count becoming negative, indicating a logic error. |
+| `pipeline:TaskScheduler:SchedulerInitialized` | `INFO` | The scheduler has been initialized with the execution plan and has identified the initial set of ready tasks. |
+| `pipeline:TaskScheduler:TaskUnlocked` | `DEBUG` | A dependent task's `UnsatisfiedDependencyCount` was decremented after a parent task completed. |
+| `pipeline:TaskScheduler:TaskReady` | `DEBUG` | A task's dependency count reached zero and it has been moved to the `ReadyQueue`. |
+| `pipeline:TaskScheduler:ProvidingTask` | `DEBUG` | The `getNextReadyTask` method is providing a task from the `ReadyQueue` to the Orchestrator. |
+| `pipeline:TaskScheduler:ReadyQueueEmpty` | `DEBUG` | The `ReadyQueue` is currently empty. The Orchestrator will wait for running tasks to complete. |
+
+---
+
+#### `Orchestrator`
+
+These logs relate to the main control loop that interacts with the scheduler and the executor.
+
+| Identifier | Log Level | Description |
+| :--- | :--- | :--- |
+| `pipeline:Orchestrator:ValidationError` | `FATAL` | The pipeline run was terminated before starting because the initial configuration validation failed. |
+| `pipeline:Orchestrator:TaskFailed` | `ERROR` | A specific task, submitted to the `Executor`, failed. The error message from the task will be included. |
+| `pipeline:Orchestrator:NoTasksToRun` | `WARN` | The `ExecutionPlanner` determined that all target stages are already persistently cached and no computation is required. |
+| `pipeline:Orchestrator:RunStarting` | `INFO` | A new pipeline run has been initiated. |
+| `pipeline:Orchestrator:ExecutionStarted` | `INFO` | The Orchestrator has received the plan and is starting the main execution loop. |
+| `pipeline:Orchestrator:RunComplete` | `INFO` | The pipeline run has finished. The log will include the final summary report of all task statuses. |
+| `pipeline:Orchestrator:FailFastTriggered` | `INFO` | A task failure has triggered the `'fail_fast'` mode, and the pipeline is terminating. |
+| `pipeline:Orchestrator:TaskSubmittedToExecutor`| `DEBUG` | A specific task has been retrieved from the scheduler and is being submitted to the `Executor` pool via `parfeval`. |
+| `pipeline:Orchestrator:TaskResultReceived` | `DEBUG` | A result (success or failure) for a specific task has been received from a completed `Future` object. |
+| `pipeline:Orchestrator:NotifyingScheduler` | `DEBUG` | The Orchestrator is notifying the `TaskScheduler` that a specific task has completed, which will trigger the unlock algorithm. |
 
 ### Storage System Log and Error Taxonomy
 

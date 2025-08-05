@@ -43,7 +43,7 @@ function run(config)
         end
         
         % Step 5: Build the stage graph
-        stage_graph = pipeline.utility.StageGraph(config.stages, logger);
+        stage_graph = pipeline.internal.StageGraph(config.stages, logger);
         % stage_graph.plot(); % Visually validate the stage graph structure
         
         % Step 6: Log successful initialization
