@@ -52,7 +52,7 @@ classdef ProvenanceHasher
             
             % The final hash is the hash of the deterministically sorted
             % components struct.
-            provenanceHash = pipeline.internal.Hasher.hash_struct(provenanceComponents);
+            provenanceHash = pipeline.utility.Hasher.hash_struct(provenanceComponents);
         end
     end
 
@@ -76,7 +76,7 @@ classdef ProvenanceHasher
                 error('pipeline:ProvenanceHasher:FunctionNotFound', msg);
             end
 
-            codeHash = pipeline.internal.Hasher.hash_file(filePath);
+            codeHash = pipeline.utility.Hasher.hash_file(filePath);
             obj.CodeHashMap(stage_name) = codeHash; % Cache the result
             obj.Logger.debug('pipeline:ProvenanceHasher:CodeHashComputed: Computed and cached code hash for stage %s', stage_name);
         end
@@ -88,7 +88,7 @@ classdef ProvenanceHasher
             if isempty(explicit_param_names)
                 % If a stage uses no parameters, its parameter hash is a
                 % constant, deterministic hash of an empty struct.
-                paramHash = pipeline.internal.Hasher.hash_struct(struct());
+                paramHash = pipeline.utility.Hasher.hash_struct(struct());
                 return;
             end
 
@@ -106,7 +106,7 @@ classdef ProvenanceHasher
                 end
             end
             
-            paramHash = pipeline.internal.Hasher.hash_struct(params_to_hash);
+            paramHash = pipeline.utility.Hasher.hash_struct(params_to_hash);
         end
 
         function inputHash = getInputSetHash(~, input_hashes_struct)
@@ -115,11 +115,11 @@ classdef ProvenanceHasher
             % (local input names) alphabetically.
             if isempty(fieldnames(input_hashes_struct))
                 % For source stages with no inputs.
-                inputHash = pipeline.internal.Hasher.hash_struct(struct());
+                inputHash = pipeline.utility.Hasher.hash_struct(struct());
                 return;
             end
             
-            inputHash = pipeline.internal.Hasher.hash_struct(input_hashes_struct);
+            inputHash = pipeline.utility.Hasher.hash_struct(input_hashes_struct);
         end
     end
 end

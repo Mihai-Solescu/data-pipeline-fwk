@@ -482,7 +482,7 @@ classdef ProvenanceHasherTest < matlab.unittest.TestCase
             % Helper to create a StageGraph and a mock logger.
             logger = mlog.Logger('TestLogger');
             logger.CommandWindowThreshold = mlog.Level.NONE; % Suppress output during tests
-            stageGraph = pipeline.utility.StageGraph(config.stages, logger);
+            stageGraph = pipeline.internal.StageGraph(config.stages, logger);
         end
         
         function config = generate_config_with_dummy_functions(testCase)

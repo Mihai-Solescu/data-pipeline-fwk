@@ -1,4 +1,4 @@
-% +storage-manager/Hasher.m
+% +utility/Hasher.m
 classdef Hasher
     % Hasher Provides static methods for creating consistent SHA-256 hashes.
     % This utility is central to the framework's caching and reproducibility
@@ -93,7 +93,14 @@ classdef Hasher
             end
 
             % Hash the deterministically ordered struct
-            sha256_hash = pipeline.internal.Hasher.hash_data(sorted_struct);
+            sha256_hash = pipeline.utility.Hasher.hash_data(sorted_struct);
+        end
+
+        function sha256_hash = hash_string(str)
+            % hash_string Computes the SHA-256 hash of a string.
+            % Convenience method for hashing strings.
+            
+            sha256_hash = pipeline.utility.Hasher.hash_data(str);
         end
 
     end

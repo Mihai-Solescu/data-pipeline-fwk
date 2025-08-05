@@ -48,9 +48,9 @@ classdef StageGraphTest < matlab.unittest.TestCase
             stages = struct();
             stages.stage1 = struct('function', @sin);
             
-            sg = pipeline.utility.StageGraph(stages, testCase.logger);
+            sg = pipeline.internal.StageGraph(stages, testCase.logger);
             
-            testCase.verifyClass(sg, 'pipeline.utility.StageGraph');
+            testCase.verifyClass(sg, 'pipeline.internal.StageGraph');
             testCase.verifyEqual(sg.Stages, stages);
         end
         
@@ -59,14 +59,14 @@ classdef StageGraphTest < matlab.unittest.TestCase
             empty_stages = struct();
             
             testCase.verifyError(...
-                @() pipeline.utility.StageGraph(empty_stages, testCase.logger), ...
+                @() pipeline.internal.StageGraph(empty_stages, testCase.logger), ...
                 'pipeline:StageGraph:InvalidInput');
         end
         
         function testConstructor_InvalidInputTypes_ThrowsError(testCase, invalidInputTypes)
             % Test that invalid input types throw appropriate error
             testCase.verifyError(...
-                @() pipeline.utility.StageGraph(invalidInputTypes, testCase.logger), ...
+                @() pipeline.internal.StageGraph(invalidInputTypes, testCase.logger), ...
                 'pipeline:StageGraph:InvalidInput');
         end
         
@@ -81,7 +81,7 @@ classdef StageGraphTest < matlab.unittest.TestCase
                 'inputs', struct('data', 'stage1.output'));
             
             testCase.verifyError(...
-                @() pipeline.utility.StageGraph(stages, testCase.logger), ...
+                @() pipeline.internal.StageGraph(stages, testCase.logger), ...
                 'pipeline:StageGraph:CircularDependency');
         end
         
@@ -93,7 +93,7 @@ classdef StageGraphTest < matlab.unittest.TestCase
                 'inputs', struct('data', 'nonexistent_stage.output'));
             
             testCase.verifyError(...
-                @() pipeline.utility.StageGraph(stages, testCase.logger), ...
+                @() pipeline.internal.StageGraph(stages, testCase.logger), ...
                 'pipeline:StageGraph:InvalidDependencyTarget');
         end
         
@@ -109,9 +109,9 @@ classdef StageGraphTest < matlab.unittest.TestCase
                 'function', @sum, ...
                 'inputs', struct('data', 'middle.result'));
             
-            sg = pipeline.utility.StageGraph(stages, testCase.logger);
+            sg = pipeline.internal.StageGraph(stages, testCase.logger);
             
-            testCase.verifyClass(sg, 'pipeline.utility.StageGraph');
+            testCase.verifyClass(sg, 'pipeline.internal.StageGraph');
             testCase.verifyNumElements(sg.getStageNames(), 4);
         end
     end
@@ -125,7 +125,7 @@ classdef StageGraphTest < matlab.unittest.TestCase
             stages.beta = struct('function', @cos);
             stages.gamma = struct('function', @tan);
             
-            sg = pipeline.utility.StageGraph(stages, testCase.logger);
+            sg = pipeline.internal.StageGraph(stages, testCase.logger);
             stage_names = sg.getStageNames();
             
             testCase.verifyNumElements(stage_names, 3);
@@ -145,7 +145,7 @@ classdef StageGraphTest < matlab.unittest.TestCase
                 'function', @cos, ...
                 'inputs', struct('data', 'second.output'));
             
-            sg = pipeline.utility.StageGraph(stages, testCase.logger);
+            sg = pipeline.internal.StageGraph(stages, testCase.logger);
             topo_sort = sg.getTopologicalSort();
             
             testCase.verifyNumElements(topo_sort, 3);
@@ -166,7 +166,7 @@ classdef StageGraphTest < matlab.unittest.TestCase
                 'function', @plus, ...
                 'inputs', struct('a', 'source1.data', 'b', 'source2.data'));
             
-            sg = pipeline.utility.StageGraph(stages, testCase.logger);
+            sg = pipeline.internal.StageGraph(stages, testCase.logger);
             sources = sg.getSourceStages();
             
             testCase.verifyNumElements(sources, 2);
@@ -186,7 +186,7 @@ classdef StageGraphTest < matlab.unittest.TestCase
                 'function', @cos, ...
                 'inputs', struct('data', 'source.output'));
             
-            sg = pipeline.utility.StageGraph(stages, testCase.logger);
+            sg = pipeline.internal.StageGraph(stages, testCase.logger);
             sinks = sg.getSinkStages();
             
             testCase.verifyNumElements(sinks, 2);
@@ -203,7 +203,7 @@ classdef StageGraphTest < matlab.unittest.TestCase
             stages = struct();
             stages.test_stage = struct('function', @sin);
             
-            sg = pipeline.utility.StageGraph(stages, testCase.logger);
+            sg = pipeline.internal.StageGraph(stages, testCase.logger);
             
             testCase.verifyTrue(sg.isStage('test_stage'));
         end
@@ -213,7 +213,7 @@ classdef StageGraphTest < matlab.unittest.TestCase
             stages = struct();
             stages.test_stage = struct('function', @sin);
             
-            sg = pipeline.utility.StageGraph(stages, testCase.logger);
+            sg = pipeline.internal.StageGraph(stages, testCase.logger);
             
             testCase.verifyFalse(sg.isStage('nonexistent_stage'));
         end
@@ -224,7 +224,7 @@ classdef StageGraphTest < matlab.unittest.TestCase
             expected_config = struct('function', @sin, 'params', {'param1'});
             stages.test_stage = expected_config;
             
-            sg = pipeline.utility.StageGraph(stages, testCase.logger);
+            sg = pipeline.internal.StageGraph(stages, testCase.logger);
             actual_config = sg.getStageConfig('test_stage');
             
             testCase.verifyEqual(actual_config, expected_config);
@@ -235,7 +235,7 @@ classdef StageGraphTest < matlab.unittest.TestCase
             stages = struct();
             stages.test_stage = struct('function', @sin);
             
-            sg = pipeline.utility.StageGraph(stages, testCase.logger);
+            sg = pipeline.internal.StageGraph(stages, testCase.logger);
             
             testCase.verifyError(...
                 @() sg.getStageConfig('nonexistent_stage'), ...
@@ -251,7 +251,7 @@ classdef StageGraphTest < matlab.unittest.TestCase
                 'function', @plus, ...
                 'inputs', struct('a', 'source1.data', 'b', 'source2.data'));
             
-            sg = pipeline.utility.StageGraph(stages, testCase.logger);
+            sg = pipeline.internal.StageGraph(stages, testCase.logger);
             predecessors = sg.getPredecessors('target');
             
             testCase.verifyNumElements(predecessors, 2);
@@ -270,7 +270,7 @@ classdef StageGraphTest < matlab.unittest.TestCase
                 'function', @cos, ...
                 'inputs', struct('data', 'source.output'));
             
-            sg = pipeline.utility.StageGraph(stages, testCase.logger);
+            sg = pipeline.internal.StageGraph(stages, testCase.logger);
             successors = sg.getSuccessors('source');
             
             testCase.verifyNumElements(successors, 2);
@@ -289,7 +289,7 @@ classdef StageGraphTest < matlab.unittest.TestCase
                 'inputs', struct('data', 'stage1.output'), ...
                 'params', {{'param3'}});
             
-            sg = pipeline.utility.StageGraph(stages, testCase.logger);
+            sg = pipeline.internal.StageGraph(stages, testCase.logger);
             
             explicit_params1 = sg.getExplicitParams('stage1');
             explicit_params2 = sg.getExplicitParams('stage2');
@@ -303,7 +303,7 @@ classdef StageGraphTest < matlab.unittest.TestCase
             stages = struct();
             stages.stage1 = struct('function', @sin);
             
-            sg = pipeline.utility.StageGraph(stages, testCase.logger);
+            sg = pipeline.internal.StageGraph(stages, testCase.logger);
             explicit_params = sg.getExplicitParams('stage1');
             
             testCase.verifyEmpty(explicit_params);
@@ -326,7 +326,7 @@ classdef StageGraphTest < matlab.unittest.TestCase
                 'function', @tan, ...
                 'inputs', struct('data', 'stage2.output'));
             
-            sg = pipeline.utility.StageGraph(stages, testCase.logger);
+            sg = pipeline.internal.StageGraph(stages, testCase.logger);
             
             % stage1 should have only its explicit params (no predecessors)
             effective1 = sg.getEffectiveParams('stage1');
@@ -358,7 +358,7 @@ classdef StageGraphTest < matlab.unittest.TestCase
                 'function', @sum, ...
                 'inputs', struct('data', 'merge.result'));
             
-            sg = pipeline.utility.StageGraph(stages, testCase.logger);
+            sg = pipeline.internal.StageGraph(stages, testCase.logger);
             
             % Source stages should have only their explicit params (no predecessors)
             effective_source1 = sg.getEffectiveParams('source1');
@@ -399,7 +399,7 @@ classdef StageGraphTest < matlab.unittest.TestCase
                 'function', @cos, ...
                 'inputs', struct('data', 'middle.output'));
             
-            sg = pipeline.utility.StageGraph(stages, testCase.logger);
+            sg = pipeline.internal.StageGraph(stages, testCase.logger);
             
             effective_source = sg.getEffectiveParams('source');
             effective_middle = sg.getEffectiveParams('middle');
@@ -423,10 +423,10 @@ classdef StageGraphTest < matlab.unittest.TestCase
                 config = generate_config();
                 
                 % Construct StageGraph
-                sg = pipeline.utility.StageGraph(config.stages, testCase.logger);
+                sg = pipeline.internal.StageGraph(config.stages, testCase.logger);
                 
                 % Verify successful construction
-                testCase.verifyClass(sg, 'pipeline.utility.StageGraph');
+                testCase.verifyClass(sg, 'pipeline.internal.StageGraph');
                 
                 % Verify all expected stages are present
                 stage_names = sg.getStageNames();
@@ -454,7 +454,7 @@ classdef StageGraphTest < matlab.unittest.TestCase
             
             try
                 config = generate_config();
-                sg = pipeline.utility.StageGraph(config.stages, testCase.logger);
+                sg = pipeline.internal.StageGraph(config.stages, testCase.logger);
                 
                 topo_sort = sg.getTopologicalSort();
                 
@@ -500,7 +500,7 @@ classdef StageGraphTest < matlab.unittest.TestCase
             
             try
                 config = generate_config();
-                sg = pipeline.utility.StageGraph(config.stages, testCase.logger);
+                sg = pipeline.internal.StageGraph(config.stages, testCase.logger);
                 
                 sources = sg.getSourceStages();
                 sinks = sg.getSinkStages();
@@ -528,7 +528,7 @@ classdef StageGraphTest < matlab.unittest.TestCase
             
             try
                 config = generate_config();
-                sg = pipeline.utility.StageGraph(config.stages, testCase.logger);
+                sg = pipeline.internal.StageGraph(config.stages, testCase.logger);
                 
                 % Test specific parameter inheritance patterns
                 
@@ -560,7 +560,7 @@ classdef StageGraphTest < matlab.unittest.TestCase
             
             try
                 config = generate_config();
-                sg = pipeline.utility.StageGraph(config.stages, testCase.logger);
+                sg = pipeline.internal.StageGraph(config.stages, testCase.logger);
                 
                 % Test predecessors of compute_svd (should be compute_hankel)
                 svd_predecessors = sg.getPredecessors('compute_svd');
@@ -595,7 +595,7 @@ classdef StageGraphTest < matlab.unittest.TestCase
             
             try
                 config = generate_config();
-                sg = pipeline.utility.StageGraph(config.stages, testCase.logger);
+                sg = pipeline.internal.StageGraph(config.stages, testCase.logger);
                 
                 % Test accessing stage configurations
                 master_config = sg.getStageConfig('compute_master_timeseries');
@@ -629,7 +629,7 @@ classdef StageGraphTest < matlab.unittest.TestCase
             stages = struct();
             stages.valid_stage = struct('function', @sin);
             
-            sg = pipeline.utility.StageGraph(stages, testCase.logger);
+            sg = pipeline.internal.StageGraph(stages, testCase.logger);
             
             try
                 sg.getPredecessors('invalid_stage');
@@ -645,7 +645,7 @@ classdef StageGraphTest < matlab.unittest.TestCase
             stages = struct();
             stages.only_stage = struct('function', @sin, 'params', {'param1'});
             
-            sg = pipeline.utility.StageGraph(stages, testCase.logger);
+            sg = pipeline.internal.StageGraph(stages, testCase.logger);
             
             % Test all query methods
             testCase.verifyEqual(sg.getStageNames(), {'only_stage'});
@@ -677,7 +677,7 @@ classdef StageGraphTest < matlab.unittest.TestCase
                 'inputs', struct('a', 'middle1.output', 'b', 'middle2.output'), ...
                 'params', {{'param5'}});
             
-            sg = pipeline.utility.StageGraph(stages, testCase.logger);
+            sg = pipeline.internal.StageGraph(stages, testCase.logger);
             
             % Test that convergence point inherits from all upstream paths
             conv_effective = sg.getEffectiveParams('convergence');
@@ -712,7 +712,7 @@ classdef StageGraphTest < matlab.unittest.TestCase
                 'function', @sum, ...
                 'inputs', struct('values', 'processor.processed_values'));
             
-            sg = pipeline.utility.StageGraph(stages, testCase.logger);
+            sg = pipeline.internal.StageGraph(stages, testCase.logger);
             
             % Test that plot executes without error
             testCase.verifyWarningFree(@() sg.plot());

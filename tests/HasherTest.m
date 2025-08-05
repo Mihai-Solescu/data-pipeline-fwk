@@ -59,8 +59,8 @@ classdef HasherTest < matlab.unittest.TestCase
             fclose(fid2);
             
             % Compute hashes
-            hash1 = pipeline.internal.Hasher.hash_file(file1);
-            hash2 = pipeline.internal.Hasher.hash_file(file2);
+            hash1 = pipeline.utility.Hasher.hash_file(file1);
+            hash2 = pipeline.utility.Hasher.hash_file(file2);
             
             % Assert that identical files have identical hashes
             testCase.verifyEqual(hash1, hash2, ...
@@ -84,8 +84,8 @@ classdef HasherTest < matlab.unittest.TestCase
             fclose(fid2);
             
             % Compute hashes
-            hash1 = pipeline.internal.Hasher.hash_file(file1);
-            hash2 = pipeline.internal.Hasher.hash_file(file2);
+            hash1 = pipeline.utility.Hasher.hash_file(file1);
+            hash2 = pipeline.utility.Hasher.hash_file(file2);
             
             % Assert that different files have different hashes
             testCase.verifyNotEqual(hash1, hash2, ...
@@ -107,7 +107,7 @@ classdef HasherTest < matlab.unittest.TestCase
             expectedHash = 'b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9';
             
             % Compute hash using our function
-            actualHash = pipeline.internal.Hasher.hash_file(testFile);
+            actualHash = pipeline.utility.Hasher.hash_file(testFile);
             
             % Assert that the hash matches the expected value
             testCase.verifyEqual(actualHash, expectedHash, ...
@@ -120,7 +120,7 @@ classdef HasherTest < matlab.unittest.TestCase
             nonexistentFile = fullfile(testCase.tempDir, 'nonexistent.txt');
             
             % Assert that an error is thrown
-            testCase.verifyError(@() pipeline.internal.Hasher.hash_file(nonexistentFile), ...
+            testCase.verifyError(@() pipeline.utility.Hasher.hash_file(nonexistentFile), ...
                 'pipeline:Hasher:FileError', ...
                 'Should throw FileError for non-existent file');
         end
@@ -129,8 +129,8 @@ classdef HasherTest < matlab.unittest.TestCase
             % Test that identical data produces identical hashes
             
             % Hash the same data twice
-            hash1 = pipeline.internal.Hasher.hash_data(test_data);
-            hash2 = pipeline.internal.Hasher.hash_data(test_data);
+            hash1 = pipeline.utility.Hasher.hash_data(test_data);
+            hash2 = pipeline.utility.Hasher.hash_data(test_data);
             
             % Assert that identical data produces identical hashes
             testCase.verifyEqual(hash1, hash2, ...
@@ -146,9 +146,9 @@ classdef HasherTest < matlab.unittest.TestCase
             data3 = [4, 2];
             
             % Compute hashes
-            hash1 = pipeline.internal.Hasher.hash_data(data1);
-            hash2 = pipeline.internal.Hasher.hash_data(data2);
-            hash3 = pipeline.internal.Hasher.hash_data(data3);
+            hash1 = pipeline.utility.Hasher.hash_data(data1);
+            hash2 = pipeline.utility.Hasher.hash_data(data2);
+            hash3 = pipeline.utility.Hasher.hash_data(data3);
             
             % Assert that all hashes are different
             testCase.verifyNotEqual(hash1, hash2, ...
@@ -170,7 +170,7 @@ classdef HasherTest < matlab.unittest.TestCase
             % Hash multiple times
             hashes = cell(5, 1);
             for i = 1:5
-                hashes{i} = pipeline.internal.Hasher.hash_data(complexData);
+                hashes{i} = pipeline.utility.Hasher.hash_data(complexData);
             end
             
             % Assert all hashes are identical
@@ -195,8 +195,8 @@ classdef HasherTest < matlab.unittest.TestCase
             struct2.field_b = 42;
             
             % Compute hashes
-            hash1 = pipeline.internal.Hasher.hash_struct(struct1);
-            hash2 = pipeline.internal.Hasher.hash_struct(struct2);
+            hash1 = pipeline.utility.Hasher.hash_struct(struct1);
+            hash2 = pipeline.utility.Hasher.hash_struct(struct2);
             
             % Assert that both structs produce the same hash
             testCase.verifyEqual(hash1, hash2, ...
@@ -211,8 +211,8 @@ classdef HasherTest < matlab.unittest.TestCase
             struct2 = struct('field_a', 'value2', 'field_b', 42);
             
             % Compute hashes
-            hash1 = pipeline.internal.Hasher.hash_struct(struct1);
-            hash2 = pipeline.internal.Hasher.hash_struct(struct2);
+            hash1 = pipeline.utility.Hasher.hash_struct(struct1);
+            hash2 = pipeline.utility.Hasher.hash_struct(struct2);
             
             % Assert that structs with different values have different hashes
             testCase.verifyNotEqual(hash1, hash2, ...
@@ -227,8 +227,8 @@ classdef HasherTest < matlab.unittest.TestCase
             struct2 = struct('field_a', 'value', 'field_c', 42);
             
             % Compute hashes
-            hash1 = pipeline.internal.Hasher.hash_struct(struct1);
-            hash2 = pipeline.internal.Hasher.hash_struct(struct2);
+            hash1 = pipeline.utility.Hasher.hash_struct(struct1);
+            hash2 = pipeline.utility.Hasher.hash_struct(struct2);
             
             % Assert that structs with different fields have different hashes
             testCase.verifyNotEqual(hash1, hash2, ...
@@ -242,7 +242,7 @@ classdef HasherTest < matlab.unittest.TestCase
             nonStructInputs = {42, 'hello', [1, 2, 3], {1, 2, 3}};
             
             for i = 1:length(nonStructInputs)
-                testCase.verifyError(@() pipeline.internal.Hasher.hash_struct(nonStructInputs{i}), ...
+                testCase.verifyError(@() pipeline.utility.Hasher.hash_struct(nonStructInputs{i}), ...
                     'pipeline:Hasher:InputError', ...
                     'Should throw InputError for non-struct input');
             end
@@ -254,7 +254,7 @@ classdef HasherTest < matlab.unittest.TestCase
             emptyStruct = struct();
             
             % This should not throw an error
-            hash = pipeline.internal.Hasher.hash_struct(emptyStruct);
+            hash = pipeline.utility.Hasher.hash_struct(emptyStruct);
             
             % Verify the result is a non-empty string
             testCase.verifyClass(hash, 'char', 'Hash should be a character array');
@@ -275,8 +275,8 @@ classdef HasherTest < matlab.unittest.TestCase
             nestedStruct.level1_c = struct('deeply', struct('nested', 'value2'));
             
             % Hash multiple times
-            hash1 = pipeline.internal.Hasher.hash_struct(nestedStruct);
-            hash2 = pipeline.internal.Hasher.hash_struct(nestedStruct);
+            hash1 = pipeline.utility.Hasher.hash_struct(nestedStruct);
+            hash2 = pipeline.utility.Hasher.hash_struct(nestedStruct);
             
             % Assert consistency
             testCase.verifyEqual(hash1, hash2, ...
@@ -292,8 +292,8 @@ classdef HasherTest < matlab.unittest.TestCase
             fwrite(fid, binContent, 'uint8');
             fclose(fid);
             
-            hash1 = pipeline.internal.Hasher.hash_file(testFile);
-            hash2 = pipeline.internal.Hasher.hash_file(testFile);
+            hash1 = pipeline.utility.Hasher.hash_file(testFile);
+            hash2 = pipeline.utility.Hasher.hash_file(testFile);
             
             testCase.verifyNotEmpty(hash1);
             testCase.verifyEqual(hash1, hash2, 'Binary file hashing should be deterministic.');
